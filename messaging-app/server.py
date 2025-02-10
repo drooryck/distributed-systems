@@ -263,6 +263,14 @@ class Server:
                 self._action_send_message(client_id, data, conn)
             elif msg_type == "fetch_messages":
                 self._action_fetch_messages(client_id, data, conn)
+            elif msg_type == "logout":
+                self._action_logout(client_id, data, conn)
+            elif msg_type == "send_delivered_messages":
+                self._action_send_delivered_messages(client_id, data, conn)
+            elif msg_type == "delete_messages":
+                self._action_delete_messages(client_id, data, conn)
+            elif msg_type == "reset_db":
+                self._action_reset_db(client_id, data, conn)
             else:
                 response_data = {"status": "error", "msg": f"Unknown action: {msg_type}"}
                 self.protocol_handler.send(conn, Message("response", response_data))
@@ -287,19 +295,20 @@ class Server:
             response_data = {"status": "error", "msg": "Username already taken."}
             self.protocol_handler.send(conn, Message("response", response_data))
             return
-        else:
-            c.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, password_hash)
-            )
-            self.conn.commit()
-            response_data = {"status": "ok", "msg": "Signup successful. Please login."}
-            self.protocol_handler.send(conn, Message("response", response_data))
+
+        c.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (username, password_hash)
+        )
+        self.conn.commit()
+        response_data = {"status": "ok", "msg": "Signup successful. Please login."}
+        self.protocol_handler.send(conn, Message("response", response_data))
 
     def _action_login(self, client_id, data, conn):
         username = data.get("username")
         password_hash = data.get("password")
 
+        # no login info given
         if not username or not password_hash:
             response_data = {"status": "error", "msg": "Invalid login data."}
             self.protocol_handler.send(conn, Message("response", response_data))
@@ -324,12 +333,15 @@ class Server:
         c = self.conn.cursor()
         c.execute("SELECT password_hash FROM users WHERE username=?", (username,))
         row = c.fetchone()
+
+        # username not found
         if not row:
             response_data = {"status": "error", "msg": "Username not found."}
             self.protocol_handler.send(conn, Message("response", response_data))
             return
 
         stored_hash = row[0]
+        # password not correct
         if stored_hash != password_hash:
             response_data = {"status": "error", "msg": "Wrong password."}
             self.protocol_handler.send(conn, Message("response", response_data))
@@ -408,6 +420,99 @@ class Server:
         response_data = {"status": "ok", "messages": fetched_messages}
         self.protocol_handler.send(conn, Message("response", response_data))
 
+
+    def _action_logout(self, client_id, data, conn):
+        current_user = self.logged_in_users.get(client_id)
+        if not current_user:
+            response_data = {"status": "error", "msg": "You are not currently logged in."}
+            self.protocol_handler.send(conn, Message("response", response_data))
+            return
+        del self.logged_in_users[client_id]
+        response_data = {"status": "ok", "msg": "You have been logged out."}
+        self.protocol_handler.send(conn, Message("response", response_data))
+
+    def _action_send_delivered_messages(self, client_id, data, conn):
+        """
+        Return all messages that have been delivered (delivered=1) for the logged-in user.
+        """
+        current_user = self.logged_in_users.get(client_id)
+        if not current_user:
+            response_data = {"status": "error", "msg": "You are not logged in."}
+            self.protocol_handler.send(conn, Message("response", response_data))
+            return
+        c = self.conn.cursor()
+        c.execute(
+            "SELECT id, sender, content FROM messages WHERE recipient=? AND delivered=1 ORDER BY id ASC",
+            (current_user,)
+        )
+        rows = c.fetchall()
+        delivered_list = []
+        for r in rows:
+            msg_id, sndr, content = r
+            delivered_list.append({"id": msg_id, "sender": sndr, "content": content})
+        response_data = {"status": "ok", "messages": delivered_list}
+        self.protocol_handler.send(conn, Message("response", response_data))
+
+    def _action_delete_messages(self, client_id, data, conn):
+        """
+        Delete one or more messages by ID. Only if recipient == current_user.
+        data should have an array of message_ids_to_delete.
+        """
+        current_user = self.logged_in_users.get(client_id)
+        if not current_user:
+            response_data = {"status": "error", "msg": "You are not logged in."}
+            self.protocol_handler.send(conn, Message("response", response_data))
+            return
+        message_ids = data.get("message_ids_to_delete", [])
+        if not isinstance(message_ids, list) or not message_ids:
+            response_data = {"status": "error", "msg": "No valid message IDs provided."}
+            self.protocol_handler.send(conn, Message("response", response_data))
+            return
+        c = self.conn.cursor()
+        placeholders = ",".join(["?"] * len(message_ids))
+        query = f"DELETE FROM messages WHERE id IN ({placeholders}) AND recipient=?"
+        params = message_ids + [current_user]
+        c.execute(query, params)
+        deleted_count = c.rowcount
+        self.conn.commit()
+        response_data = {
+            "status": "ok",
+            "msg": f"Deleted {deleted_count} messages.",
+            "deleted_count": deleted_count
+        }
+        self.protocol_handler.send(conn, Message("response", response_data))
+
+    def _action_reset_db(self, client_id, data, conn):
+        """Resets the database. TEMPORARY FEATURE for testing only."""
+        print("⚠️ Resetting database upon client request...")
+        c = self.conn.cursor()
+        # Drop tables to clear old data
+        c.execute("DROP TABLE IF EXISTS users;")
+        c.execute("DROP TABLE IF EXISTS messages;")
+
+        # Recreate tables
+        c.execute("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL
+            );
+        """)
+
+        c.execute("""
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender TEXT,
+                recipient TEXT,
+                content TEXT,
+                delivered INTEGER DEFAULT 0
+            );
+        """)
+
+        self.conn.commit()
+        print("✅ Database reset complete.")
+        response_data = {"status": "ok", "msg": "Database reset."}
+        self.protocol_handler.send(conn, Message("response", response_data))
 
     #############################
     # 4. UTILITIES
