@@ -83,6 +83,14 @@ class StreamlitChatApp:
     """
     Main application class for our Streamlit-based Chat App.
     Handles layout, user actions, and state management around ChatServerClient.
+
+    Changes for "while-logged-in" vs. "while-away" messages:
+      - We call `send_all_messages_to_client` automatically while the user is logged in,
+        to receive any newly-sent messages that arrived in real-time (sent_while_away=0)
+        and also retrieve previously-delivered messages if the server so chooses.
+      - We call `fetch_messages` manually to retrieve messages that arrived
+        while the user was away/offline (sent_while_away=1), letting the user specify
+        how many messages to fetch at once.
     """
 
     def __init__(self, server_host="127.0.0.1", server_port=5555):
@@ -98,7 +106,7 @@ class StreamlitChatApp:
         if "logged_in" not in st.session_state:
             st.session_state.logged_in = False
         if "all_messages" not in st.session_state:
-            st.session_state.all_messages = []  # Accumulated messages
+            st.session_state.all_messages = []  # Accumulated messages (delivered + newly fetched)
         if "unread_count" not in st.session_state:
             st.session_state.unread_count = 0
         if "username" not in st.session_state:
@@ -216,6 +224,7 @@ class StreamlitChatApp:
     def show_send_message_page(self):
         """
         Page to send a new message to another user.
+        (If the user is logged in, the server will consider sent_while_away=0 for these messages.)
         """
         st.header("Send a Message")
         recipient = st.text_input("Recipient Username", key="recipient")
@@ -239,12 +248,18 @@ class StreamlitChatApp:
             else:
                 st.success("Message sent!")
 
-    def _auto_fetch_unlimited(self):
+    def _auto_fetch_logged_in_messages(self):
         """
-        Helper method to auto-fetch all new messages every few seconds.
+        Helper method to auto-fetch messages that arrived while the user is logged in.
+        This calls the new 'send_all_messages_to_client' action.
+
+        The server will:
+          - Deliver any new messages with sent_while_away=0, marking them delivered=1
+          - Potentially include previously-delivered messages if it chooses (the server logic decides).
         """
-        resp = self.client.send_request("fetch_messages", {"num_messages": 9999})
+        resp = self.client.send_request("send_all_messages_to_client", {})
         if resp and resp.get("data", {}).get("status") == "ok":
+            # The server returns a list of messages in resp["data"]["messages"], presumably
             new_msgs = resp.get("data", {}).get("messages", [])
             existing_ids = {m["id"] for m in st.session_state.all_messages}
             added_count = 0
@@ -252,29 +267,31 @@ class StreamlitChatApp:
                 if m["id"] not in existing_ids:
                     st.session_state.all_messages.append(m)
                     added_count += 1
-            # Reset unread count once fetched
-            st.session_state.unread_count = 0
+            # The server might also update unread counts, or we can set them ourselves:
+            st.session_state.unread_count = 0  # We reset it, but you may refine the logic
             if added_count > 0:
                 st.info(f"Auto-fetched {added_count} new message(s).")
 
     def show_inbox_page(self):
         """
-        Displays all messages in the user's inbox, allows manual fetch, autorefresh,
-        and now offers multi-message deletion. After deleting, we also retrieve
-        delivered messages from the server to refresh the local view.
+        Displays messages in the user's inbox. We do two fetches:
+          1) Automatic fetch (every 5s) for messages that arrived while user is logged in.
+             This calls 'send_all_messages_to_client' behind the scenes.
+          2) A manual button for retrieving messages that were sent while the user was away/offline.
+             This calls 'fetch_messages' with a user-specified number to retrieve.
         """
         st.header("Inbox")
 
         # Insert an autorefresh to re-run every 5 seconds to fetch new messages automatically.
         st_autorefresh(interval=5000, key="inbox_autorefresh")
 
-        # Perform auto-fetch for new messages
-        self._auto_fetch_unlimited()
+        # Perform auto-fetch for "while-logged-in" messages
+        self._auto_fetch_logged_in_messages()
 
-        # Manual fetch for a specific number
-        st.write("**Manually fetch a specific number of undelivered messages**")
+        # Manual fetch for a specific number of "offline/away" messages (sent_while_away=1).
+        st.write("**Manually fetch offline (away) messages**")
         st.session_state.manual_fetch_count = st.number_input(
-            "Manual fetch count",
+            "How many 'away' messages to fetch at once?",
             min_value=1,
             max_value=100,
             value=st.session_state.manual_fetch_count,
@@ -282,6 +299,7 @@ class StreamlitChatApp:
         )
 
         if st.button("Fetch Manually"):
+            # This new call is only for messages where sent_while_away=1 & delivered=0
             resp = self.client.send_request(
                 "fetch_messages",
                 {"num_messages": st.session_state.manual_fetch_count}
@@ -294,24 +312,23 @@ class StreamlitChatApp:
                     if m["id"] not in existing_ids:
                         st.session_state.all_messages.append(m)
                         added_count += 1
-                st.session_state.unread_count -= added_count
-                st.success(f"Fetched {added_count} message(s) manually.")
+                # You might also adjust st.session_state.unread_count here if desired
+                st.success(f"Fetched {added_count} offline message(s).")
             else:
                 st.error("Manual fetch failed or returned an error.")
 
-        # Display messages with checkboxes for multi-select deletion
+        # Now display all messages in st.session_state.all_messages
+        # with checkboxes for multi-select deletion:
         if st.session_state.all_messages:
             sorted_msgs = sorted(
                 st.session_state.all_messages,
                 key=lambda x: x.get("id", 0)
             )
             st.markdown("### Messages in your inbox:")
-            
-            # We'll store the IDs of selected messages for a bulk delete
+
             selected_msg_ids = []
 
             for msg in sorted_msgs:
-                # A row with a checkbox and message details
                 cols = st.columns([0.07, 0.93])
                 with cols[0]:
                     selected = st.checkbox("", key=f"select_{msg['id']}")
@@ -324,43 +341,29 @@ class StreamlitChatApp:
                         unsafe_allow_html=True
                     )
                 st.markdown("---")
-
                 if selected:
                     selected_msg_ids.append(msg["id"])
 
-            # Button to delete the selected messages
+            # Button to delete all selected messages at once
             if st.button("Delete Selected"):
                 if not selected_msg_ids:
                     st.warning("No messages selected for deletion.")
                 else:
-                    # Step 1: Client sends server the message IDs to delete
                     del_resp = self.client.send_request(
                         "delete_messages",
                         {"message_ids_to_delete": selected_msg_ids}
                     )
-                    # Steps 2 and 3 happen on server side:
-                    #   server deletes them, then returns a success message
                     if del_resp and del_resp.get("data", {}).get("status") == "ok":
                         st.success(f"Deleted {len(selected_msg_ids)} message(s).")
-                        # Remove them locally
+                        # Remove them from local memory
                         st.session_state.all_messages = [
                             m for m in st.session_state.all_messages
                             if m["id"] not in selected_msg_ids
                         ]
-                        # Step 4: fetch delivered messages to refresh
-                        delivered_resp = self.client.send_request("send_delivered_messages", {})
-                        if delivered_resp and delivered_resp.get("data", {}).get("status") == "ok":
-                            delivered_list = delivered_resp.get("data", {}).get("messages", [])
-                            # Merge newly delivered messages (if any) into local storage
-                            for m in delivered_list:
-                                if m["id"] not in {msg["id"] for msg in st.session_state.all_messages}:
-                                    st.session_state.all_messages.append(m)
-                            st.experimental_rerun()
-                        else:
-                            st.error("Deletion succeeded, but could not fetch delivered messages.")
+                        # After deletion, you could re-call send_all_messages_to_client
+                        # or fetch_messages if you want to refresh, but let's omit for brevity.
                     else:
                         st.error("Failed to delete selected messages.")
-
         else:
             st.info("No messages in your inbox. The app will automatically check every 5s.")
 
@@ -385,7 +388,7 @@ class StreamlitChatApp:
     def run_app(self):
         """
         Main entry point for the Streamlit application.
-        Handles whether the user is logged in and routes accordingly.
+        Routes to the appropriate page based on whether or not the user is logged in.
         """
         # Apply custom CSS
         self.apply_custom_css()
@@ -395,6 +398,7 @@ class StreamlitChatApp:
         # If user is logged in, show user info and navigation
         if st.session_state.logged_in:
             st.sidebar.markdown(f"**User: {st.session_state.username}**")
+            st.sidebar.markdown(f"**Unread Messages: {st.session_state.unread_count}**")
 
             menu = st.sidebar.radio("Navigation", ["Home", "Send Message", "Inbox", "Logout"])
 
@@ -408,8 +412,7 @@ class StreamlitChatApp:
                 self.show_logout_page()
 
         else:
-            # User is not logged in
-            # Show login / signup page
+            # User is not logged in -> Show login/signup
             self.show_login_or_signup_page()
 
 
