@@ -22,7 +22,7 @@ class TestMessageDeliveryStatus(BaseTest):
         self.send_message("login", {"username": "Frank", "password": "pass123"})
         self.receive_response()
 
-        self.send_message("fetch_messages", {"num_messages": 5})
+        self.send_message("fetch_away_msgs", {"num_messages": 5})
         first_fetch = self.receive_response()
-
+        print(first_fetch)
         self.assertEqual(len(first_fetch["data"]["messages"]), 1)

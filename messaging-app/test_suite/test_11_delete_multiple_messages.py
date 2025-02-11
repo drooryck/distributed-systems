@@ -35,13 +35,13 @@ class TestDeleteMultipleMessages(BaseTest):
         self.receive_response()
 
         # Bob fetches -> messages now delivered
-        self.send_message("fetch_messages", {"num_messages": 10})
+        self.send_message("fetch_away_msgs", {"num_messages": 10})
         fetch_response = self.receive_response()
         delivered_list = fetch_response["data"]["messages"]
         self.assertEqual(len(delivered_list), 3, "❌ Bob should have 3 delivered messages")
 
-        # Bob calls send_delivered_messages -> should see 3 messages
-        self.send_message("send_delivered_messages", {})
+        # Bob calls send_messages_to_client -> should see 3 messages
+        self.send_message("send_messages_to_client", {})
         delivered_response = self.receive_response()
         self.assertEqual(len(delivered_response["data"]["messages"]), 3, "❌ Still expecting 3 delivered messages")
 
@@ -52,7 +52,7 @@ class TestDeleteMultipleMessages(BaseTest):
         self.assertEqual(delete_resp["data"]["deleted_count"], 2, "❌ Should delete exactly 2 messages")
 
         # Now only 1 delivered message should remain
-        self.send_message("send_delivered_messages", {})
+        self.send_message("send_messages_to_client", {})
         final_delivered = self.receive_response()
         self.assertEqual(len(final_delivered["data"]["messages"]), 1, "❌ Only 1 message should remain after deleting 2")
 

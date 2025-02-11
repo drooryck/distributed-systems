@@ -7,7 +7,7 @@ class TestDeleteSingleMessage(BaseTest):
         2. Alice sends a message to Bob
         3. Bob logs in & fetches (delivers) the message
         4. Bob deletes that single message
-        5. Confirm it's removed from send_delivered_messages
+        5. Confirm it's removed from send_messages_to_client
         """
         self.reset_database()
 
@@ -34,14 +34,14 @@ class TestDeleteSingleMessage(BaseTest):
         self.receive_response()
 
         # Bob fetches -> message now delivered
-        self.send_message("fetch_messages", {"num_messages": 5})
+        self.send_message("fetch_away_msgs", {"num_messages": 5})
         fetch_response = self.receive_response()
         self.assertEqual(len(fetch_response["data"]["messages"]), 1, "❌ Bob should fetch 1 message")
 
         msg_id = fetch_response["data"]["messages"][0]["id"]
 
-        # Bob calls send_delivered_messages -> should see 1 message
-        self.send_message("send_delivered_messages", {})
+        # Bob calls send_messages_to_client -> should see 1 message
+        self.send_message("send_messages_to_client", {})
         delivered_before_delete = self.receive_response()
         self.assertEqual(len(delivered_before_delete["data"]["messages"]), 1, "❌ Should have 1 delivered message")
 
@@ -52,7 +52,7 @@ class TestDeleteSingleMessage(BaseTest):
         self.assertEqual(delete_response["data"]["deleted_count"], 1, "❌ Should delete exactly 1 message")
 
         # Verify it's no longer in delivered
-        self.send_message("send_delivered_messages", {})
+        self.send_message("send_messages_to_client", {})
         delivered_after_delete = self.receive_response()
         self.assertEqual(len(delivered_after_delete["data"]["messages"]), 0, "❌ Message should be gone after deletion")
 
