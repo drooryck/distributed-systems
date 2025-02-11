@@ -259,7 +259,7 @@ class StreamlitChatApp:
         """
         resp = self.client.send_request("send_all_messages_to_client", {})
         if resp and resp.get("data", {}).get("status") == "ok":
-            # The server returns a list of messages in resp["data"]["messages"], presumably
+            # The server returns a list of messages in resp["data"]["messages"]
             new_msgs = resp.get("data", {}).get("messages", [])
             existing_ids = {m["id"] for m in st.session_state.all_messages}
             added_count = 0
@@ -267,8 +267,6 @@ class StreamlitChatApp:
                 if m["id"] not in existing_ids:
                     st.session_state.all_messages.append(m)
                     added_count += 1
-            # The server might also update unread counts, or we can set them ourselves:
-            st.session_state.unread_count = 0  # We reset it, but you may refine the logic
             if added_count > 0:
                 st.info(f"Auto-fetched {added_count} new message(s).")
 
@@ -312,7 +310,7 @@ class StreamlitChatApp:
                     if m["id"] not in existing_ids:
                         st.session_state.all_messages.append(m)
                         added_count += 1
-                # You might also adjust st.session_state.unread_count here if desired
+                st.session_state.unread_count -= added_count
                 st.success(f"Fetched {added_count} offline message(s).")
             else:
                 st.error("Manual fetch failed or returned an error.")
@@ -360,8 +358,8 @@ class StreamlitChatApp:
                             m for m in st.session_state.all_messages
                             if m["id"] not in selected_msg_ids
                         ]
-                        # After deletion, you could re-call send_all_messages_to_client
-                        # or fetch_messages if you want to refresh, but let's omit for brevity.
+                        # After deletion: re-call send_all_messages_to_client
+                        # or fetch_messages if you want to refresh the inbox?
                     else:
                         st.error("Failed to delete selected messages.")
         else:
