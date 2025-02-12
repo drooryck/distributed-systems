@@ -3,12 +3,14 @@ import streamlit as st
 import socket
 import json
 import hashlib
-import struct  # Needed for packing/unpacking the 4-byte length prefix
+import struct  # For packing/unpacking the 4-byte length prefix
 import time
 
 # pip install streamlit-autorefresh
 from streamlit_autorefresh import st_autorefresh
 
+
+# for all functions: make sure you understand these lines (e.g. see docs)
 
 class ChatServerClient:
     """
@@ -19,13 +21,14 @@ class ChatServerClient:
     def __init__(self, server_host="127.0.0.1", server_port=5555):
         self.server_host = server_host
         self.server_port = server_port
-    
+
     def _get_socket(self):
         """
         Get (or create) a persistent socket connection stored in Streamlit's session state.
         """
         if "socket" not in st.session_state:
             try:
+                # make sure you understand these lines (e.g. see docs)
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((self.server_host, self.server_port))
                 s.settimeout(5)
@@ -40,28 +43,28 @@ class ChatServerClient:
         Send a request to the server using length-prefixed JSON.
         The message format is:
             {
-                "msg_type": <action string>,   # e.g., "login", "signup"
+                "msg_type": <action string>,  # e.g., "login", "signup"
                 "data": { ... }               # a dict with the relevant fields
             }
         """
-        s = self._get_socket()
-        if not s:
+        sock = self._get_socket()
+        if not sock:
             return None
         try:
             request = {"msg_type": msg_type, "data": data}
             encoded = json.dumps(request).encode("utf-8")
             length_prefix = struct.pack("!I", len(encoded))
-            s.sendall(length_prefix + encoded)
+            sock.sendall(length_prefix + encoded)
 
             # Receive the 4-byte length of the response
-            length_bytes = s.recv(4)
+            length_bytes = sock.recv(4)
             if not length_bytes:
                 st.error("No response from server. Connection closed.")
                 return None
             (length,) = struct.unpack("!I", length_bytes)
 
             # Now receive the JSON response (assuming it fits in one recv)
-            response_bytes = s.recv(length)
+            response_bytes = sock.recv(length)
             if not response_bytes:
                 st.error("No response from server after length prefix.")
                 return None
@@ -82,7 +85,13 @@ class ChatServerClient:
 class StreamlitChatApp:
     """
     Main application class for our Streamlit-based Chat App.
-    Handles layout, user actions, and state management around ChatServerClient.
+    Two-step approach for offline messages:
+      - "fetch_away_msgs(limit=N)" => partial/manual fetch of messages that were not delivered immediately.
+      - "send_messages_to_client" => auto-deliver only messages marked for immediate delivery.
+      
+    Also includes ephemeral messages in the UI:
+      - When new online messages arrive automatically,
+      - When offline messages are manually fetched (partial fetching).
     """
 
     def __init__(self, server_host="127.0.0.1", server_port=5555):
@@ -98,16 +107,25 @@ class StreamlitChatApp:
         if "logged_in" not in st.session_state:
             st.session_state.logged_in = False
         if "all_messages" not in st.session_state:
-            st.session_state.all_messages = []  # Accumulated messages
+            st.session_state.all_messages = []
         if "unread_count" not in st.session_state:
             st.session_state.unread_count = 0
         if "username" not in st.session_state:
             st.session_state.username = ""
         if "inbox_page" not in st.session_state:
             st.session_state.inbox_page = 0
-        # We'll store the user's desired manual fetch count in session state.
         if "manual_fetch_count" not in st.session_state:
-            st.session_state.manual_fetch_count = 50  # Default to 50 for manual retrieval
+            st.session_state.manual_fetch_count = 5
+
+        # For listing accounts
+        if "account_pattern" not in st.session_state:
+            st.session_state.account_pattern = ""
+        if "account_start" not in st.session_state:
+            st.session_state.account_start = 0
+        if "account_count" not in st.session_state:
+            st.session_state.account_count = 10
+        if "found_accounts" not in st.session_state:
+            st.session_state.found_accounts = []
 
     def apply_custom_css(self):
         """
@@ -149,10 +167,18 @@ class StreamlitChatApp:
             unsafe_allow_html=True
         )
 
+    def _update_unread_count(self):
+        """
+        Calls 'count_unread' on the server to get the number of messages 
+        that have not yet been delivered (to_deliver==0) and sets st.session_state.unread_count.
+        """
+        resp = self.client.send_request("count_unread", {})
+        if resp and resp.get("data", {}).get("status") == "ok":
+            st.session_state.unread_count = resp.get("data", {}).get("unread_count", 0)
+
     def show_login_or_signup_page(self):
         """
-        Displays the login / signup UI. If a user logs in or creates an account,
-        updates session state accordingly.
+        Page to login or create an account.
         """
         st.header("Login or Create Account")
         action = st.radio("Select Action", ["Login", "Create Account"])
@@ -175,34 +201,40 @@ class StreamlitChatApp:
 
                 if response.get("data", {}).get("status") == "ok":
                     st.success("Logged in successfully!")
+                    # Clear any cached messages on new login
+                    st.session_state.all_messages = []
                     st.session_state.logged_in = True
                     st.session_state.username = username
-                    st.session_state.unread_count = response.get("data", {}).get("unread_count", 0)
+                    st.session_state.unread_count = response["data"].get("unread_count", 0)
+                    # Immediately fetch any pending messages:
+                    self._auto_fetch_inbox()
+                    # Re-run script to update the UI
                     st.experimental_rerun()
                 else:
                     st.error(response.get("data", {}).get("msg", "Action failed."))
 
             else:  # Create Account
-                response = self.client.send_request("signup", data)
-                if response is None:
+                signup_resp = self.client.send_request("signup", data)
+                if signup_resp is None:
                     st.error("No response from server. Check that the server is running.")
                     return
 
-                if not response.get("data", {}).get("status") == "ok":
-                    st.error(response.get("data", {}).get("msg", "Action failed."))
+                if not signup_resp.get("data", {}).get("status") == "ok":
+                    st.error(signup_resp.get("data", {}).get("msg", "Action failed."))
                     return
 
-                # Auto-login after successful account creation
-                login_response = self.client.send_request("login", data)
-                # Check if auto-login was actually successful
-                if not login_response or login_response.get("data", {}).get("status") != "ok":
+                # Auto-login after successful creation
+                login_resp = self.client.send_request("login", data)
+                if not login_resp or login_resp.get("data", {}).get("status") != "ok":
                     st.error("Account created but auto-login failed.")
                     return
 
                 st.success("Account created and logged in successfully!")
+                st.session_state.all_messages = []  # Clear cached messages
                 st.session_state.logged_in = True
                 st.session_state.username = username
-                st.session_state.unread_count = login_response.get("data", {}).get("unread_count", 0)
+                st.session_state.unread_count = login_resp["data"].get("unread_count", 0)
+                self._auto_fetch_inbox()
                 st.experimental_rerun()
 
     def show_home_page(self):
@@ -211,11 +243,13 @@ class StreamlitChatApp:
         """
         st.header("Welcome!")
         st.write(f"You have {st.session_state.unread_count} unread message(s).")
-        st.info("Use the sidebar to navigate to Send Message, Inbox, or Logout.")
+        st.info("Use the sidebar to navigate to Send Message, Inbox, List Accounts, or Delete Account, or Logout.")
 
     def show_send_message_page(self):
         """
         Page to send a new message to another user.
+        (If the user is logged in, the server sets to_deliver=1 for immediate delivery;
+         otherwise, the message will be stored for later manual fetching.)
         """
         st.header("Send a Message")
         recipient = st.text_input("Recipient Username", key="recipient")
@@ -231,138 +265,248 @@ class StreamlitChatApp:
                 "recipient": recipient,
                 "content": message_text
             }
-            response = self.client.send_request("send_message", data)
-            if response is None:
+            resp = self.client.send_request("send_message", data)
+            if resp is None:
                 st.error("No response from server. Check that the server is running.")
-            elif not response.get("data", {}).get("status") == "ok":
-                st.error(response.get("data", {}).get("msg", "Failed to send message."))
+            elif resp.get("data", {}).get("status") != "ok":
+                st.error(resp.get("data", {}).get("msg", "Failed to send message."))
             else:
                 st.success("Message sent!")
+                # Update unread count if needed
+                self._update_unread_count()
 
-    def _auto_fetch_unlimited(self):
+    def _auto_fetch_inbox(self):
         """
-        Helper method to auto-fetch all new messages every few seconds.
+        Called every 5 seconds to fetch messages that arrived while the user was logged in.
+        Only fetches **new** messages that were marked for immediate delivery (to_deliver==1).
         """
-        resp = self.client.send_request("fetch_messages", {"num_messages": 9999})
+        resp = self.client.send_request("send_messages_to_client", {})
         if resp and resp.get("data", {}).get("status") == "ok":
-            new_msgs = resp.get("data", {}).get("messages", [])
+            returned_msgs = resp["data"].get("msg", [])
             existing_ids = {m["id"] for m in st.session_state.all_messages}
-            added_count = 0
-            for m in new_msgs:
+            newly_added = 0
+            
+            # Add only new messages that are not already in the inbox.
+            for m in returned_msgs:
                 if m["id"] not in existing_ids:
                     st.session_state.all_messages.append(m)
-                    added_count += 1
-            # Reset unread count once fetched
-            st.session_state.unread_count = 0
-            if added_count > 0:
-                st.info(f"Auto-fetched {added_count} new message(s).")
+                    newly_added += 1
+            
+            if newly_added > 0:
+                st.info(f"Auto-delivered {newly_added} new message(s).")
+
+            self._update_unread_count()
 
     def show_inbox_page(self):
         """
-        Displays all messages in the user's inbox, allows manual fetch, autorefresh,
-        and now offers multi-message deletion. After deleting, we also retrieve
-        delivered messages from the server to refresh the local view.
+        The main inbox page.
+
+          1) Auto-fetch every 5s for new messages (to_deliver==1)
+          2) Manual fetch for offline messages (to_deliver==0)
+          3) Display messages in LIFO order, 10 per page.
         """
         st.header("Inbox")
 
-        # Insert an autorefresh to re-run every 5 seconds to fetch new messages automatically.
+        # Auto-refresh every 5 seconds
         st_autorefresh(interval=5000, key="inbox_autorefresh")
 
-        # Perform auto-fetch for new messages
-        self._auto_fetch_unlimited()
+        # Step 1: auto fetch for messages marked for immediate delivery.
+        self._auto_fetch_inbox()
 
-        # Manual fetch for a specific number
-        st.write("**Manually fetch a specific number of undelivered messages**")
+        st.write("**Manually fetch offline messages**")
         st.session_state.manual_fetch_count = st.number_input(
-            "Manual fetch count",
+            "How many offline messages to fetch at once?",
             min_value=1,
             max_value=100,
             value=st.session_state.manual_fetch_count,
             step=1
         )
 
+        # Step 2: manual fetch for offline messages (to_deliver==0)
         if st.button("Fetch Manually"):
-            resp = self.client.send_request(
-                "fetch_messages",
-                {"num_messages": st.session_state.manual_fetch_count}
+            away_resp = self.client.send_request(
+                "fetch_away_msgs",
+                {"limit": st.session_state.manual_fetch_count}
             )
-            if resp and resp.get("data", {}).get("status") == "ok":
-                new_msgs = resp.get("data", {}).get("messages", [])
-                existing_ids = {m["id"] for m in st.session_state.all_messages}
-                added_count = 0
-                for m in new_msgs:
-                    if m["id"] not in existing_ids:
-                        st.session_state.all_messages.append(m)
-                        added_count += 1
-                st.session_state.unread_count -= added_count
-                st.success(f"Fetched {added_count} message(s) manually.")
+            if away_resp and away_resp.get("data", {}).get("status") == "ok":
+                new_away = away_resp["data"].get("msg", [])
+                if new_away:
+                    existing_ids = {m["id"] for m in st.session_state.all_messages}
+                    added_count = 0
+                    for m in new_away:
+                        if m["id"] not in existing_ids:
+                            st.session_state.all_messages.append(m)
+                            added_count += 1
+                    st.success(f"Manually fetched {added_count} offline message(s).")
+                    time.sleep(1)  # Prevent immediate rerun from wiping out success message
+                    st.experimental_rerun()
+                else:
+                    st.info("No new offline messages were found.")
             else:
                 st.error("Manual fetch failed or returned an error.")
 
-        # Display messages with checkboxes for multi-select deletion
-        if st.session_state.all_messages:
-            sorted_msgs = sorted(
-                st.session_state.all_messages,
-                key=lambda x: x.get("id", 0)
-            )
-            st.markdown("### Messages in your inbox:")
-            
-            # We'll store the IDs of selected messages for a bulk delete
-            selected_msg_ids = []
+        # Pagination
+        MESSAGES_PER_PAGE = 10
+        all_msgs = st.session_state.all_messages
+        total_msgs = len(all_msgs)
 
-            for msg in sorted_msgs:
-                # A row with a checkbox and message details
+        if total_msgs == 0:
+            st.info("No messages in your inbox yet.")
+            return
+
+        total_pages = (total_msgs + MESSAGES_PER_PAGE - 1) // MESSAGES_PER_PAGE
+
+        # Next/Prev page controls
+        colA, colB = st.columns(2)
+        with colA:
+            if st.button("Prev Page"):
+                if st.session_state.inbox_page > 0:
+                    st.session_state.inbox_page -= 1
+        with colB:
+            if st.session_state.inbox_page < total_pages - 1:
+                if st.button("Next Page"):
+                    st.session_state.inbox_page += 1
+
+        st.write(f"**Page {st.session_state.inbox_page + 1} / {total_pages}**")
+
+        # Sort messages in LIFO order
+        sorted_msgs = sorted(all_msgs, key=lambda x: x.get("id", 0), reverse=True)
+        start_idx = st.session_state.inbox_page * MESSAGES_PER_PAGE
+        end_idx = start_idx + MESSAGES_PER_PAGE
+        page_msgs = sorted_msgs[start_idx:end_idx]
+
+        if page_msgs:
+            st.markdown("### Messages in your inbox (latest first):")
+            selected_msg_ids = []
+            for msg in page_msgs:
                 cols = st.columns([0.07, 0.93])
                 with cols[0]:
                     selected = st.checkbox("", key=f"select_{msg['id']}")
                 with cols[1]:
-                    st.markdown(
-                        f"**ID:** {msg['id']} | **From:** {msg.get('sender')}"
-                    )
+                    st.markdown(f"**ID:** {msg['id']} | **From:** {msg.get('sender')}")
                     st.markdown(
                         f"<div style='padding: 0.5rem 0;'>{msg.get('content')}</div>",
                         unsafe_allow_html=True
                     )
                 st.markdown("---")
-
                 if selected:
                     selected_msg_ids.append(msg["id"])
 
-            # Button to delete the selected messages
+            # Deletion
             if st.button("Delete Selected"):
                 if not selected_msg_ids:
                     st.warning("No messages selected for deletion.")
                 else:
-                    # Step 1: Client sends server the message IDs to delete
                     del_resp = self.client.send_request(
                         "delete_messages",
                         {"message_ids_to_delete": selected_msg_ids}
                     )
-                    # Steps 2 and 3 happen on server side:
-                    #   server deletes them, then returns a success message
                     if del_resp and del_resp.get("data", {}).get("status") == "ok":
                         st.success(f"Deleted {len(selected_msg_ids)} message(s).")
-                        # Remove them locally
+                        # Remove deleted messages from local cache
                         st.session_state.all_messages = [
                             m for m in st.session_state.all_messages
                             if m["id"] not in selected_msg_ids
                         ]
-                        # Step 4: fetch delivered messages to refresh
-                        delivered_resp = self.client.send_request("send_delivered_messages", {})
-                        if delivered_resp and delivered_resp.get("data", {}).get("status") == "ok":
-                            delivered_list = delivered_resp.get("data", {}).get("messages", [])
-                            # Merge newly delivered messages (if any) into local storage
-                            for m in delivered_list:
-                                if m["id"] not in {msg["id"] for msg in st.session_state.all_messages}:
-                                    st.session_state.all_messages.append(m)
-                            st.experimental_rerun()
-                        else:
-                            st.error("Deletion succeeded, but could not fetch delivered messages.")
+                        self._auto_fetch_inbox()
+                        st.experimental_rerun()
                     else:
                         st.error("Failed to delete selected messages.")
-
         else:
-            st.info("No messages in your inbox. The app will automatically check every 5s.")
+            st.info("No messages on this page.")
+
+    def show_list_accounts_page(self):
+        """
+        A page that searches for user accounts by pattern, with basic pagination.
+        If user enters '*', interpret that as '%'.
+        """
+        st.header("Search / List Accounts")
+
+        # Local data to this function 
+        st.session_state.account_pattern = st.text_input(
+            "Username Pattern (enter * for all)",
+            value=st.session_state.account_pattern
+        )
+        st.session_state.account_count = st.number_input(
+            "Accounts per page",
+            min_value=1,
+            max_value=50,
+            value=st.session_state.account_count,
+            step=1
+        )
+
+        if st.button("Search / Refresh"):
+            st.session_state.account_start = 0
+            self._search_accounts()
+
+        if st.session_state.found_accounts:
+            st.markdown("**Matching Accounts**:")
+            for acc in st.session_state.found_accounts:
+                st.write(f"- {acc}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Prev Accounts") and st.session_state.account_start > 0:
+                    st.session_state.account_start -= st.session_state.account_count
+                    if st.session_state.account_start < 0:
+                        st.session_state.account_start = 0
+                    self._search_accounts()
+
+            with col2:
+                if len(st.session_state.found_accounts) == st.session_state.account_count:
+                    if st.button("Next Accounts"):
+                        st.session_state.account_start += st.session_state.account_count
+                        self._search_accounts()
+        else:
+            st.info("No accounts found or no search performed yet.")
+
+    def _search_accounts(self):
+        """
+        Helper function to call the server's 'list_accounts' action.
+        If user enters '*', interpret that as '%'.
+        """
+        pattern = st.session_state.account_pattern.strip()
+        if pattern == "*":
+            pattern = "%"
+        start = st.session_state.account_start
+        count = st.session_state.account_count
+
+        data = {
+            "pattern": pattern,
+            "start": start,
+            "count": count
+        }
+        resp = self.client.send_request("list_accounts", data)
+        if resp and resp.get("data", {}).get("status") == "ok":
+            user_list = resp["data"].get("users", [])
+            st.session_state.found_accounts = user_list
+        else:
+            st.error("Could not list accounts or no users found.")
+            st.session_state.found_accounts = []
+
+    def show_delete_account_page(self):
+        """
+        Page for the user to delete their own account. 
+        Calls 'delete_account' server action.
+        After success, logs them out and resets local state.
+        """
+        st.header("Delete My Account")
+        st.warning("This will permanently delete your account and all associated messages!")
+
+        if st.button("Confirm Delete Account"):
+            resp = self.client.send_request("delete_account", {})
+            if resp and resp.get("data", {}).get("status") == "ok":
+                st.success("Account deleted successfully!")
+                st.session_state.logged_in = False
+                st.session_state.username = ""
+                st.session_state.unread_count = 0
+                st.session_state.all_messages = []
+                if "socket" in st.session_state:
+                    st.session_state["socket"].close()
+                    del st.session_state["socket"]
+                st.experimental_rerun()
+            else:
+                st.error("Failed to delete account, or you are not logged in.")
 
     def show_logout_page(self):
         """
@@ -385,18 +529,19 @@ class StreamlitChatApp:
     def run_app(self):
         """
         Main entry point for the Streamlit application.
-        Handles whether the user is logged in and routes accordingly.
+        Routes to the appropriate page based on whether or not the user is logged in.
         """
-        # Apply custom CSS
         self.apply_custom_css()
 
-        st.title("Chat Application (JSON Protocol)")
+        st.title("JoChat")
 
-        # If user is logged in, show user info and navigation
         if st.session_state.logged_in:
             st.sidebar.markdown(f"**User: {st.session_state.username}**")
 
-            menu = st.sidebar.radio("Navigation", ["Home", "Send Message", "Inbox", "Logout"])
+            menu = st.sidebar.radio(
+                "Navigation",
+                ["Home", "Send Message", "Inbox", "List Accounts", "Delete Account", "Logout"]
+            )
 
             if menu == "Home":
                 self.show_home_page()
@@ -404,12 +549,13 @@ class StreamlitChatApp:
                 self.show_send_message_page()
             elif menu == "Inbox":
                 self.show_inbox_page()
+            elif menu == "List Accounts":
+                self.show_list_accounts_page()
+            elif menu == "Delete Account":
+                self.show_delete_account_page()
             elif menu == "Logout":
                 self.show_logout_page()
-
         else:
-            # User is not logged in
-            # Show login / signup page
             self.show_login_or_signup_page()
 
 
