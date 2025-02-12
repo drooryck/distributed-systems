@@ -209,7 +209,7 @@ class StreamlitChatApp:
                     # Immediately fetch any pending messages:
                     self._auto_fetch_inbox()
                     # Re-run script to update the UI
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error(response.get("data", {}).get("msg", "Action failed."))
 
@@ -235,7 +235,7 @@ class StreamlitChatApp:
                 st.session_state.username = username
                 st.session_state.unread_count = login_resp["data"].get("unread_count", 0)
                 self._auto_fetch_inbox()
-                st.experimental_rerun()
+                st.rerun()
 
     def show_home_page(self):
         """
@@ -339,7 +339,7 @@ class StreamlitChatApp:
                             added_count += 1
                     st.success(f"Manually fetched {added_count} offline message(s).")
                     time.sleep(1)  # Prevent immediate rerun from wiping out success message
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.info("No new offline messages were found.")
             else:
@@ -409,7 +409,7 @@ class StreamlitChatApp:
                             if m["id"] not in selected_msg_ids
                         ]
                         self._auto_fetch_inbox()
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Failed to delete selected messages.")
         else:
@@ -504,7 +504,7 @@ class StreamlitChatApp:
                 if "socket" in st.session_state:
                     st.session_state["socket"].close()
                     del st.session_state["socket"]
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Failed to delete account, or you are not logged in.")
 
@@ -522,7 +522,7 @@ class StreamlitChatApp:
                 if "socket" in st.session_state:
                     st.session_state["socket"].close()
                     del st.session_state["socket"]
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error(response.get("data", {}).get("msg", "Logout failed."))
 
