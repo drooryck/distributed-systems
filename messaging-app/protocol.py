@@ -73,6 +73,8 @@ class CustomProtocolHandler:
     Handles sending and receiving messages with a custom (binary) wire protocol.
     This is just a minimal placeholder.
     """
+    
+    """
     def send(self, conn, message: Message):
         msg_type_encoded = message.msg_type.encode("utf-8")
         msg_type_len = len(msg_type_encoded)
@@ -104,3 +106,36 @@ class CustomProtocolHandler:
         # Extract integer values
         data_values = struct.unpack("!II", data[4 + msg_type_len:])  # Assuming 2 integers
         return Message(msg_type, {"value1": data_values[0], "value2": data_values[1]})
+        """
+    
+    def send(self, conn, message: Message):
+        msg_type_encoded = message.msg_type.encode("utf-8")
+        data_json = json.dumps(message.data).encode("utf-8")
+        combined = msg_type_encoded + b"\x00" + data_json
+        conn.sendall(struct.pack("!I", len(combined)))
+        conn.sendall(combined)
+
+    def receive(self, conn):
+        length_prefix = conn.recv(4)
+        if not length_prefix:
+            return None
+        (length,) = struct.unpack("!I", length_prefix)
+        if length == 0:
+            return None
+
+        # Read exactly 'length' bytes
+        data = b""
+        while len(data) < length:
+            chunk = conn.recv(length - len(data))
+            if not chunk:
+                return None
+            data += chunk
+
+        parts = data.split(b"\x00", 1)
+        if len(parts) < 2:
+            return None
+        msg_type_encoded, json_data = parts
+        msg_type = msg_type_encoded.decode("utf-8")
+        data_dict = json.loads(json_data.decode("utf-8"))
+
+        return Message(msg_type, data_dict)

@@ -1,6 +1,6 @@
 JoChat is a distributed messaging system that supports user authentication, message delivery, and account management.
 
-0. Quick set-up
+0. Quick set-up, Deployment Documentation
 1. 
 You will need to run the following commands in a fresh virtual environment.
 - pip install -r requirements.txt
@@ -8,7 +8,7 @@ You will need to run the following commands in a fresh virtual environment.
 - make run-client
 This will spin up a streamlit application in your web-browser from which you will be able to use the messaging app. You can sign up, log-in, see the number of unread messages while you were away, send a message to another user, list all accounts that match a wildcard pattern and paginate through them, delete the account of the user you are logged in as, and log out of the account you are currently signed in with. 
 
-2. Here is an overview of all files:
+1. Here is an overview of all files,
 messaging-app/
 │── test_suite/             # Directory containing all unit tests
 │   │── test_1_login.py     # Test for user login functionality
@@ -26,7 +26,8 @@ messaging-app/
 │── client_log.txt          # Logs for client interactions
 │── streamlit_app2.py       # Streamlit application (if applicable)
 
-3. Explanations of files in a more 'literate programming' style.
+1. Explanations of files in a more 'literate programming' style. Code Documentation.
+
 The server is the backbone of the messaging system. It listens for client connections, processes user requests, and manages message delivery. It operates using socket programming, allowing multiple clients to communicate with it over a network. The server handles user authentication, allowing users to sign up, log in, and log out while ensuring that only one socket is logged in to any one account, and any one account is only present on one socket.
 Messages are stored in an SQLite database (chat.db), which keeps track of registered users and all sent messages. Each message includes metadata such as the sender, recipient, content, and delivery status. If a recipient is offline when a message is sent, the server flags it as "sent while away", ensuring that it is available when the user logs back in.
 A threading model is used to handle multiple clients simultaneously. When a client connects, the server spawns a new thread to manage communication with that specific client. The server follows a request-response model, where clients send JSON-formatted requests specifying an action (e.g., "send_message", "fetch_messages", "delete_account"), and the server responds with the corresponding data or status message. The server spins up a queue of actions for each client that the server polls through.

@@ -476,7 +476,7 @@ class Server:
             );
         """)
         self.conn.commit()
-        print("✅ Database reset complete.")
+        print("Database reset complete.")
         resp = {"status": "ok", "msg": "Database reset."}
         self.protocol_handler.send(conn, Message("response", resp))
 
@@ -501,5 +501,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    server = Server(host=args.host, port=args.port, protocol="json")
+    server = Server(host=args.host, port=args.port, protocol=args.protocol)
     server.start_server()
+

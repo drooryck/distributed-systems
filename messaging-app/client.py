@@ -59,7 +59,7 @@ class ChatServerClient:
 
             # Receive response
             response = self.protocol_handler.receive(sock)
-            print(f"[DEBUG] Raw response received from server: {response}")
+            #print(f"[DEBUG] Raw response received from server: {response}, {self.protocol_handler}")
             return response.data if response else None
         except Exception as e:
             st.error(f"Error communicating with server: {e}")
@@ -373,7 +373,7 @@ class StreamlitChatApp:
             for msg in page_msgs:
                 cols = st.columns([0.07, 0.93])
                 with cols[0]:
-                    selected = st.checkbox("", key=f"select_{msg['id']}")
+                    selected = st.checkbox("", key=f"select_{msg['id']}", label_visibility="collapsed")
                 with cols[1]:
                     st.markdown(f"**ID:** {msg['id']} | **From:** {msg.get('sender')}")
                     st.markdown(
@@ -561,9 +561,10 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="10.250.120.214", help="Server IP address (default: 10.250.120.214)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
     parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
-                        help="Protocol to use: 'json' or 'binary' (default: json)")
+                        help="Protocol to use: 'json' or 'custom' (default: json)")
 
     args = parser.parse_args()
 
-    app = StreamlitChatApp(server_host="10.250.120.214", server_port=5555, protocol="json")
+    # Pass the chosen protocol dynamically
+    app = StreamlitChatApp(server_host=args.host, server_port=args.port, protocol=args.protocol)
     app.run_app()
