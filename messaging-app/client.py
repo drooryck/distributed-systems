@@ -18,7 +18,7 @@ class ChatServerClient:
     (length-prefixed JSON messages).
     """
 
-    def __init__(self, server_host="127.0.0.1", server_port=5555):
+    def __init__(self, server_host="10.250.120.214", server_port=5555):
         self.server_host = server_host
         self.server_port = server_port
 
@@ -94,7 +94,7 @@ class StreamlitChatApp:
       - When offline messages are manually fetched (partial fetching).
     """
 
-    def __init__(self, server_host="127.0.0.1", server_port=5555):
+    def __init__(self, server_host="10.250.120.214", server_port=5555):
         self.server_host = server_host
         self.server_port = server_port
         self.client = ChatServerClient(server_host, server_port)
@@ -563,5 +563,5 @@ class StreamlitChatApp:
 # Actually run the app (Streamlit entry point)
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    app = StreamlitChatApp(server_host="127.0.0.1", server_port=5555)
+    app = StreamlitChatApp(server_host="10.250.120.214", server_port=5555)
     app.run_app()
