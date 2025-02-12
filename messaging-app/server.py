@@ -135,8 +135,7 @@ class Server:
                 sender TEXT,
                 recipient TEXT,
                 content TEXT,
-                delivered INTEGER DEFAULT 0,
-                sent_while_away INTEGER DEFAULT 0
+                to_deliver INTEGER DEFAULT 0
             );
         """)
         self.conn.commit()
@@ -207,7 +206,7 @@ class Server:
             elif msg_type == "send_messages_to_client":
                 self._action_send_messages_to_client(client_id, data, conn)
             elif msg_type == "fetch_away_msgs":
-                self._action_fetch_away_msgs(client_id, data, conn)
+                self._action_fetch_away_messages(client_id, data, conn)
             elif msg_type == "list_accounts":
                 self._action_list_accounts(client_id, data, conn)
             elif msg_type == "delete_messages":
@@ -289,7 +288,7 @@ class Server:
         c.execute("""
             SELECT COUNT(*) 
             FROM messages 
-            WHERE recipient=? AND delivered=0 AND sent_while_away=1
+            WHERE recipient=? AND to_deliver=0
         """, (username,))
         (unread_count,) = c.fetchone()
         resp = {
@@ -322,7 +321,7 @@ class Server:
         c.execute("""
             SELECT COUNT(*) 
             FROM messages
-            WHERE recipient=? AND delivered=0 AND sent_while_away=1
+            WHERE recipient=? AND to_deliver=0
         """, (current_user,))
         (unread_count,) = c.fetchone()
         resp = {
@@ -343,6 +342,7 @@ class Server:
             resp = {"status": "error", "msg": "You are not logged in as this sender."}
             self.protocol_handler.send(conn, Message("response", resp))
             return
+
         if not recipient or not content:
             resp = {"status": "error", "msg": "Recipient and content required."}
             self.protocol_handler.send(conn, Message("response", resp))
@@ -356,16 +356,23 @@ class Server:
             self.protocol_handler.send(conn, Message("response", resp))
             return
 
+        # If the recipient is logged in, we mark to_deliver=1 immediately
         recipient_is_logged_in = any(u == recipient for u in self.logged_in_users.values())
-        sent_while_away = 0 if recipient_is_logged_in else 1
-        self._store_message(sender, recipient, content, sent_while_away)
+        delivered_value = 1 if recipient_is_logged_in else 0
 
-        resp = {"status": "ok", "msg": "message stored"}
+        # Insert into messages with to_deliver=(0 or 1)
+        c.execute("""
+            INSERT INTO messages (sender, recipient, content, to_deliver)
+            VALUES (?, ?, ?, ?)
+        """, (sender, recipient, content, delivered_value))
+        self.conn.commit()
+
+        resp = {"status": "ok", "msg": "Message stored."}
         self.protocol_handler.send(conn, Message("response", resp))
 
+
     # 6) send_messages_to_client
-    #    - returns any (delivered=0 AND sent_while_away=1) messages, marking them delivered=1
-    #      PLUS any (delivered=1) messages (regardless of sent_while_away).
+    #    - returns any messages that are to be delivered (to_deliver==1), marking them delivered=1.
     def _action_send_messages_to_client(self, client_id, data, conn):
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
@@ -374,70 +381,71 @@ class Server:
             return
 
         c = self.conn.cursor()
-        # We want either (delivered=0, sent_while_away=1) OR (delivered=1, any sent_while_away)
-        # That means: (delivered=0 AND sent_while_away=1) OR (delivered=1)
         c.execute("""
-            SELECT id, sender, content, delivered, sent_while_away
+            SELECT id, sender, content, to_deliver
             FROM messages
-            WHERE recipient=? 
-              AND (
-                (delivered=0 AND sent_while_away=1)
-                OR (delivered=1)
-              )
+            WHERE recipient=? AND to_deliver=1
             ORDER BY id ASC
         """, (current_user,))
         rows = c.fetchall()
 
-        # Mark away/undelivered messages as delivered
-        # Those with delivered=0 and sent_while_away=1
-        away_ids = [str(r[0]) for r in rows if r[3] == 0 and r[4] == 1]
-        if away_ids:
-            placeholders = ",".join(["?"] * len(away_ids))
-            query = f"UPDATE messages SET delivered=1 WHERE id IN ({placeholders})"
-            c.execute(query, away_ids)
-            self.conn.commit()
-
         results = []
-        for (msg_id, snd, content, delivered, away) in rows:
+        for (msg_id, snd, content, to_deliver) in rows:
             results.append({
                 "id": msg_id,
                 "sender": snd,
                 "content": content,
-                "delivered": delivered,
-                "sent_while_away": away
+                "to_deliver": to_deliver
             })
 
         resp = {"status": "ok", "msg": results}
         self.protocol_handler.send(conn, Message("response", resp))
 
-    # 7) fetch_away_msgs
-    #    - returns a specified number of messages where sent_while_away=1
-    def _action_fetch_away_msgs(self, client_id, data, conn):
+    # 7) fetch_away_messages
+    #    - returns a specified number of messages that have to_deliver==0
+    #    - doesn't even need to send anything back to be honest.
+    def _action_fetch_away_messages(self, client_id, data, conn):
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
             self.protocol_handler.send(conn, Message("response", resp))
             return
 
-        limit = data.get("limit", 5)
+        # We'll allow the user to specify a limit, default=10
+        limit = data.get("limit", 10)
 
         c = self.conn.cursor()
+        # Find messages that have not been delivered yet
         c.execute("""
             SELECT id, sender, content
             FROM messages
-            WHERE recipient=? AND sent_while_away=1
+            WHERE recipient=? AND to_deliver=0
             ORDER BY id ASC
             LIMIT ?
         """, (current_user, limit))
         rows = c.fetchall()
 
-        # Build output
-        away_list = []
-        for (msg_id, snd, content) in rows:
-            away_list.append({"id": msg_id, "sender": snd, "content": content})
+        # Mark them delivered
+        message_ids = [str(r[0]) for r in rows]
+        if message_ids:
+            placeholders = ",".join(["?"] * len(message_ids))
+            query = f"UPDATE messages SET to_deliver=1 WHERE id IN ({placeholders})"
+            c.execute(query, message_ids)
+            self.conn.commit()
 
-        resp = {"status": "ok", "msg": away_list}
+        # Build the list to send back
+        fetched_messages = []
+        for row in rows:
+            msg_id, snd, content = row
+            fetched_messages.append({
+                "id": msg_id,
+                "sender": snd,
+                "content": content
+            })
+
+        resp = {"status": "ok", "msg": fetched_messages}
         self.protocol_handler.send(conn, Message("response", resp))
+
 
     # 8) list_accounts
     def _action_list_accounts(self, client_id, data, conn):
@@ -535,8 +543,7 @@ class Server:
                 sender TEXT,
                 recipient TEXT,
                 content TEXT,
-                delivered INTEGER DEFAULT 0,
-                sent_while_away INTEGER DEFAULT 0
+                to_deliver INTEGER DEFAULT 0
             );
         """)
         self.conn.commit()
@@ -548,12 +555,12 @@ class Server:
     # UTILITIES
     #############################
 
-    def _store_message(self, sender, recipient, content, sent_while_away):
+    def _store_message(self, sender, recipient, content):
         c = self.conn.cursor()
         c.execute("""
-            INSERT INTO messages (sender, recipient, content, delivered, sent_while_away)
-            VALUES (?, ?, ?, ?, ?)
-        """, (sender, recipient, content, 0, sent_while_away))
+            INSERT INTO messages (sender, recipient, content, to_deliver)
+            VALUES (?, ?, ?, ?)
+        """, (sender, recipient, content, 0))
         self.conn.commit()
 
 

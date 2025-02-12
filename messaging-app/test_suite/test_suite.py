@@ -10,7 +10,7 @@ from test_7_auth_required import TestAuthenticationRequired
 
 # New tests
 from test_8_logout_login import TestLogoutLogin
-from test_9_send_delivered_messages import TestSendDeliveredMessages
+from test_9_send_messsages_to_client import TestSendMessagesToClient
 from test_10_delete_single_message import TestDeleteSingleMessage
 from test_11_delete_multiple_messages import TestDeleteMultipleMessages
 from test_12_delete_account import TestDeleteAccount
@@ -28,7 +28,7 @@ if __name__ == "__main__":
             unittest.defaultTestLoader.loadTestsFromTestCase(TestAuthenticationRequired),
             # New tests
             unittest.defaultTestLoader.loadTestsFromTestCase(TestLogoutLogin),
-            unittest.defaultTestLoader.loadTestsFromTestCase(TestSendDeliveredMessages),
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestSendMessagesToClient),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteSingleMessage),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteMultipleMessages),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteAccount),

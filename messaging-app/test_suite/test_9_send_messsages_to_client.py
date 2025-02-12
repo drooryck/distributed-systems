@@ -1,7 +1,7 @@
 from test_base import BaseTest
 
-class TestSendDeliveredMessages(BaseTest):
-    def test_send_delivered_messages(self):
+class TestSendMessagesToClient(BaseTest):
+    def test_send_messages_to_client(self):
         """
         1. Alice & Bob sign up
         2. Alice sends a message to Bob
@@ -27,6 +27,7 @@ class TestSendDeliveredMessages(BaseTest):
         self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Hello Bob!"})
         send_response = self.receive_response()
         self.assertEqual(send_response["data"]["status"], "ok", "❌ Sending message should succeed")
+    
 
         # Logout Alice
         self.send_message("logout", {})
@@ -40,15 +41,19 @@ class TestSendDeliveredMessages(BaseTest):
         # Bob fetches messages -> they become delivered
         self.send_message("fetch_away_msgs", {"num_messages": 5})
         fetch_response = self.receive_response()
+        
         self.assertEqual(fetch_response["data"]["status"], "ok", "❌ fetch__away_msgs should succeed")
-        self.assertEqual(len(fetch_response["data"]["messages"]), 1, "❌ Bob should fetch exactly 1 new message")
+        self.assertEqual(len(fetch_response["data"]["msg"]), 1, "❌ Bob should fetch exactly 1 new message")
 
         # Now Bob calls send_delivered_messages
         self.send_message("send_messages_to_client", {})
         delivered_response = self.receive_response()
+        print(delivered_response)
+    
         self.assertEqual(delivered_response["data"]["status"], "ok", "❌ send_messages_to_client should succeed")
+        delivered_msgs = delivered_response["data"]["msg"]
+        print(delivered_msgs)
 
-        delivered_msgs = delivered_response["data"]["messages"]
         self.assertEqual(len(delivered_msgs), 1, "❌ Bob should see exactly 1 delivered message")
         self.assertEqual(delivered_msgs[0]["content"], "Hello Bob!", "❌ The delivered message content should match")
 

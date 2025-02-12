@@ -65,7 +65,7 @@ class TestDeleteAccount(BaseTest):
         self.send_message("fetch_away_msgs", {"num_messages": 5})
         bob_fetch_resp = self.receive_response()
         self.assertEqual(bob_fetch_resp["data"]["status"], "ok", "❌ fetch_away_msgs should succeed for Bob.")
-        self.assertEqual(len(bob_fetch_resp["data"]["messages"]), 0, "❌ All of Alice's messages should be removed.")
+        self.assertEqual(len(bob_fetch_resp["data"]["msg"]), 0, "❌ All of Alice's messages should be removed.")
 
 
 if __name__ == "__main__":

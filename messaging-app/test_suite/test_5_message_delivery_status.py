@@ -25,4 +25,4 @@ class TestMessageDeliveryStatus(BaseTest):
         self.send_message("fetch_away_msgs", {"num_messages": 5})
         first_fetch = self.receive_response()
         print(first_fetch)
-        self.assertEqual(len(first_fetch["data"]["messages"]), 1)
+        self.assertEqual(len(first_fetch["data"]["msg"]), 1)

@@ -36,14 +36,14 @@ class TestDeleteSingleMessage(BaseTest):
         # Bob fetches -> message now delivered
         self.send_message("fetch_away_msgs", {"num_messages": 5})
         fetch_response = self.receive_response()
-        self.assertEqual(len(fetch_response["data"]["messages"]), 1, "❌ Bob should fetch 1 message")
+        self.assertEqual(len(fetch_response["data"]["msg"]), 1, "❌ Bob should fetch 1 message")
 
-        msg_id = fetch_response["data"]["messages"][0]["id"]
+        msg_id = fetch_response["data"]["msg"][0]["id"]
 
         # Bob calls send_messages_to_client -> should see 1 message
         self.send_message("send_messages_to_client", {})
         delivered_before_delete = self.receive_response()
-        self.assertEqual(len(delivered_before_delete["data"]["messages"]), 1, "❌ Should have 1 delivered message")
+        self.assertEqual(len(delivered_before_delete["data"]["msg"]), 1, "❌ Should have 1 delivered message")
 
         # Bob deletes this message
         self.send_message("delete_messages", {"message_ids_to_delete": [msg_id]})
@@ -54,7 +54,7 @@ class TestDeleteSingleMessage(BaseTest):
         # Verify it's no longer in delivered
         self.send_message("send_messages_to_client", {})
         delivered_after_delete = self.receive_response()
-        self.assertEqual(len(delivered_after_delete["data"]["messages"]), 0, "❌ Message should be gone after deletion")
+        self.assertEqual(len(delivered_after_delete["data"]["msg"]), 0, "❌ Message should be gone after deletion")
 
 if __name__ == "__main__":
     import unittest
