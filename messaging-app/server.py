@@ -107,7 +107,7 @@ class Server:
       10) delete_account
       11) reset_db
     """
-    def __init__(self, host="127.0.0.1", port=5555, protocol="json", db_name="chat.db"):
+    def __init__(self, host="10.250.120.214", port=5555, protocol="json", db_name="chat.db"):
         self.host = host
         self.port = port
         self.protocol = protocol.lower()
