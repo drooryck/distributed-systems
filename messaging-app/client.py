@@ -5,22 +5,30 @@ import json
 import hashlib
 import struct  # For packing/unpacking the 4-byte length prefix
 import time
+import argparse
 
 # pip install streamlit-autorefresh
 from streamlit_autorefresh import st_autorefresh
 
+from protocol import Message, JSONProtocolHandler, CustomProtocolHandler
+
 
 # for all functions: make sure you understand these lines (e.g. see docs)
-
 class ChatServerClient:
     """
     Encapsulates server connection behavior and JSON communication protocol
     (length-prefixed JSON messages).
     """
 
-    def __init__(self, server_host="10.250.120.214", server_port=5555):
+    def __init__(self, server_host="10.250.120.214", server_port=5555, protocol="json"):
         self.server_host = server_host
         self.server_port = server_port
+        self.protocol = protocol
+        if protocol == "json":
+            self.protocol_handler = JSONProtocolHandler()
+        else:
+            self.protocol_handler = CustomProtocolHandler()
+
 
     def _get_socket(self):
         """
@@ -40,36 +48,19 @@ class ChatServerClient:
 
     def send_request(self, msg_type, data):
         """
-        Send a request to the server using length-prefixed JSON.
-        The message format is:
-            {
-                "msg_type": <action string>,  # e.g., "login", "signup"
-                "data": { ... }               # a dict with the relevant fields
-            }
+        Send a request to the server using the selected protocol.
         """
         sock = self._get_socket()
         if not sock:
             return None
         try:
-            request = {"msg_type": msg_type, "data": data}
-            encoded = json.dumps(request).encode("utf-8")
-            length_prefix = struct.pack("!I", len(encoded))
-            sock.sendall(length_prefix + encoded)
+            message = Message(msg_type, data)
+            self.protocol_handler.send(sock, message)
 
-            # Receive the 4-byte length of the response
-            length_bytes = sock.recv(4)
-            if not length_bytes:
-                st.error("No response from server. Connection closed.")
-                return None
-            (length,) = struct.unpack("!I", length_bytes)
-
-            # Now receive the JSON response (assuming it fits in one recv)
-            response_bytes = sock.recv(length)
-            if not response_bytes:
-                st.error("No response from server after length prefix.")
-                return None
-
-            return json.loads(response_bytes.decode("utf-8"))
+            # Receive response
+            response = self.protocol_handler.receive(sock)
+            print(f"[DEBUG] Raw response received from server: {response}")
+            return response.data if response else None
         except Exception as e:
             st.error(f"Error communicating with server: {e}")
         return None
@@ -94,10 +85,10 @@ class StreamlitChatApp:
       - When offline messages are manually fetched (partial fetching).
     """
 
-    def __init__(self, server_host="10.250.120.214", server_port=5555):
+    def __init__(self, server_host="10.250.120.214", server_port=5555, protocol="json"):
         self.server_host = server_host
         self.server_port = server_port
-        self.client = ChatServerClient(server_host, server_port)
+        self.client = ChatServerClient(server_host, server_port, protocol)
         self._initialize_session_state()
 
     def _initialize_session_state(self):
@@ -173,8 +164,8 @@ class StreamlitChatApp:
         that have not yet been delivered (to_deliver==0) and sets st.session_state.unread_count.
         """
         resp = self.client.send_request("count_unread", {})
-        if resp and resp.get("data", {}).get("status") == "ok":
-            st.session_state.unread_count = resp.get("data", {}).get("unread_count", 0)
+        if resp and resp.get("status") == "ok":
+            st.session_state.unread_count = resp.get("unread_count", 0)
 
     def show_login_or_signup_page(self):
         """
@@ -199,19 +190,20 @@ class StreamlitChatApp:
                     st.error("No response from server. Check that the server is running.")
                     return
 
-                if response.get("data", {}).get("status") == "ok":
+                if response.get("status") == "ok":
                     st.success("Logged in successfully!")
                     # Clear any cached messages on new login
                     st.session_state.all_messages = []
                     st.session_state.logged_in = True
                     st.session_state.username = username
-                    st.session_state.unread_count = response["data"].get("unread_count", 0)
+                    st.session_state.unread_count = response.get("unread_count", 0)
                     # Immediately fetch any pending messages:
                     self._auto_fetch_inbox()
                     # Re-run script to update the UI
                     st.rerun()
                 else:
-                    st.error(response.get("data", {}).get("msg", "Action failed."))
+                    st.error(response.get("msg", "Action failed."))
+
 
             else:  # Create Account
                 signup_resp = self.client.send_request("signup", data)
@@ -219,13 +211,13 @@ class StreamlitChatApp:
                     st.error("No response from server. Check that the server is running.")
                     return
 
-                if not signup_resp.get("data", {}).get("status") == "ok":
-                    st.error(signup_resp.get("data", {}).get("msg", "Action failed."))
+                if not signup_resp.get("status") == "ok":
+                    st.error(signup_resp.get("msg", "Action failed."))
                     return
 
                 # Auto-login after successful creation
                 login_resp = self.client.send_request("login", data)
-                if not login_resp or login_resp.get("data", {}).get("status") != "ok":
+                if not login_resp or login_resp.get("status") != "ok":
                     st.error("Account created but auto-login failed.")
                     return
 
@@ -233,7 +225,7 @@ class StreamlitChatApp:
                 st.session_state.all_messages = []  # Clear cached messages
                 st.session_state.logged_in = True
                 st.session_state.username = username
-                st.session_state.unread_count = login_resp["data"].get("unread_count", 0)
+                st.session_state.unread_count = login_resp.get("unread_count", 0)
                 self._auto_fetch_inbox()
                 st.rerun()
 
@@ -268,7 +260,7 @@ class StreamlitChatApp:
             resp = self.client.send_request("send_message", data)
             if resp is None:
                 st.error("No response from server. Check that the server is running.")
-            elif resp.get("data", {}).get("status") != "ok":
+            elif resp.get("status") != "ok":
                 st.error(resp.get("data", {}).get("msg", "Failed to send message."))
             else:
                 st.success("Message sent!")
@@ -281,8 +273,8 @@ class StreamlitChatApp:
         Only fetches **new** messages that were marked for immediate delivery (to_deliver==1).
         """
         resp = self.client.send_request("send_messages_to_client", {})
-        if resp and resp.get("data", {}).get("status") == "ok":
-            returned_msgs = resp["data"].get("msg", [])
+        if resp and resp.get("status") == "ok":
+            returned_msgs = resp.get("msg", [])
             existing_ids = {m["id"] for m in st.session_state.all_messages}
             newly_added = 0
             
@@ -328,8 +320,8 @@ class StreamlitChatApp:
                 "fetch_away_msgs",
                 {"limit": st.session_state.manual_fetch_count}
             )
-            if away_resp and away_resp.get("data", {}).get("status") == "ok":
-                new_away = away_resp["data"].get("msg", [])
+            if away_resp and away_resp.get("status") == "ok":
+                new_away = away_resp.get("msg", [])
                 if new_away:
                     existing_ids = {m["id"] for m in st.session_state.all_messages}
                     added_count = 0
@@ -401,7 +393,7 @@ class StreamlitChatApp:
                         "delete_messages",
                         {"message_ids_to_delete": selected_msg_ids}
                     )
-                    if del_resp and del_resp.get("data", {}).get("status") == "ok":
+                    if del_resp and del_resp.get("status") == "ok":
                         st.success(f"Deleted {len(selected_msg_ids)} message(s).")
                         # Remove deleted messages from local cache
                         st.session_state.all_messages = [
@@ -477,8 +469,8 @@ class StreamlitChatApp:
             "count": count
         }
         resp = self.client.send_request("list_accounts", data)
-        if resp and resp.get("data", {}).get("status") == "ok":
-            user_list = resp["data"].get("users", [])
+        if resp and resp.get("status") == "ok":
+            user_list = resp.get("users", [])
             st.session_state.found_accounts = user_list
         else:
             st.error("Could not list accounts or no users found.")
@@ -495,7 +487,7 @@ class StreamlitChatApp:
 
         if st.button("Confirm Delete Account"):
             resp = self.client.send_request("delete_account", {})
-            if resp and resp.get("data", {}).get("status") == "ok":
+            if resp and resp.get("status") == "ok":
                 st.success("Account deleted successfully!")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
@@ -515,7 +507,7 @@ class StreamlitChatApp:
         """
         if st.button("Logout"):
             response = self.client.send_request("logout", {})
-            if response and response.get("data", {}).get("status") == "ok":
+            if response and response.get("status") == "ok":
                 st.success("Logged out.")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
@@ -524,7 +516,9 @@ class StreamlitChatApp:
                     del st.session_state["socket"]
                 st.rerun()
             else:
-                st.error(response.get("data", {}).get("msg", "Logout failed."))
+                st.error(response.get("msg", "Logout failed."))
+                
+                
 
     def run_app(self):
         """
@@ -563,5 +557,13 @@ class StreamlitChatApp:
 # Actually run the app (Streamlit entry point)
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    app = StreamlitChatApp(server_host="10.250.120.214", server_port=5555)
+    parser = argparse.ArgumentParser(description="JoChat Client")
+    parser.add_argument("--host", type=str, default="10.250.120.214", help="Server IP address (default: 10.250.120.214)")
+    parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
+    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
+                        help="Protocol to use: 'json' or 'binary' (default: json)")
+
+    args = parser.parse_args()
+
+    app = StreamlitChatApp(server_host="10.250.120.214", server_port=5555, protocol="json")
     app.run_app()

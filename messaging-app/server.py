@@ -4,90 +4,14 @@ import sqlite3
 from queue import Queue
 import json
 import struct
+import argparse
+import struct
+
+from protocol import Message, JSONProtocolHandler, CustomProtocolHandler
+
 
 #############################
-# 1. MESSAGE CLASS
-#############################
-class Message:
-    """
-    Represents a generic message object that can be used for both
-    JSON and custom wire protocols.
-    """
-    def __init__(self, msg_type, data):
-        self.msg_type = msg_type
-        self.data = data
-
-    def __repr__(self):
-        return f"<Message type={self.msg_type}, data={self.data}>"
-
-#############################
-# 2. PROTOCOL HANDLERS
-#############################
-
-class JSONProtocolHandler:
-    """
-    Handles sending and receiving messages in JSON format.
-    Assumes length-prefixing using 4 bytes (struct.pack).
-    """
-    def send(self, conn, message: Message):
-        payload = {
-            "msg_type": message.msg_type,
-            "data": message.data
-        }
-        encoded = json.dumps(payload).encode("utf-8")
-        conn.sendall(struct.pack("!I", len(encoded)))
-        conn.sendall(encoded)
-
-    def receive(self, conn):
-        length_prefix = conn.recv(4)
-        if not length_prefix:
-            return None
-        (length,) = struct.unpack("!I", length_prefix)
-        if length == 0:
-            return None
-        data = conn.recv(length)
-        if not data:
-            return None
-        payload = json.loads(data.decode("utf-8"))
-        msg_type = payload.get("msg_type", "")
-        msg_data = payload.get("data", {})
-        return Message(msg_type, msg_data)
-
-
-class CustomProtocolHandler:
-    """
-    Handles sending and receiving messages with a custom (binary) wire protocol.
-    This is just a minimal placeholder.
-    """
-    def send(self, conn, message: Message):
-        msg_type_encoded = message.msg_type.encode("utf-8")
-        data_str = json.dumps(message.data)
-        data_encoded = data_str.encode("utf-8")
-
-        combined = msg_type_encoded + b"\x00" + data_encoded
-        conn.sendall(struct.pack("!I", len(combined)))
-        conn.sendall(combined)
-
-    def receive(self, conn):
-        length_prefix = conn.recv(4)
-        if not length_prefix:
-            return None
-        (length,) = struct.unpack("!I", length_prefix)
-        if length == 0:
-            return None
-        combined = conn.recv(length)
-        if not combined:
-            return None
-        parts = combined.split(b"\x00", 1)
-        if len(parts) < 2:
-            return None
-        msg_type_encoded, data_encoded = parts
-        msg_type = msg_type_encoded.decode("utf-8")
-        data_dict = json.loads(data_encoded.decode("utf-8"))
-        return Message(msg_type, data_dict)
-
-#############################
-# 3. SERVER CLASS
+# 1. SERVER CLASS
 #############################
 
 class Server:
@@ -111,6 +35,11 @@ class Server:
         self.host = host
         self.port = port
         self.protocol = protocol.lower()
+        if self.protocol == "json":
+            self.protocol_handler = JSONProtocolHandler()
+        else:
+            self.protocol_handler = CustomProtocolHandler()
+
         self.db_name = db_name
 
         self.client_queues = {}     # {client_id: Queue()}
@@ -565,5 +494,12 @@ class Server:
 
 
 if __name__ == "__main__":
-    server = Server(protocol="json")
+    parser = argparse.ArgumentParser(description="Start the messaging server.")
+    parser.add_argument("--host", type=str, default="10.250.120.214", help="IP address to bind the server (default: 10.250.120.214)")
+    parser.add_argument("--port", type=int, default=5555, help="Port to listen on (default: 5555)")
+    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json", help="Protocol to use (default: json)")
+
+    args = parser.parse_args()
+
+    server = Server(host=args.host, port=args.port, protocol="json")
     server.start_server()

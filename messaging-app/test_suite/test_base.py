@@ -3,7 +3,7 @@ import json
 import struct
 import unittest
 
-SERVER_HOST = "127.0.0.1"
+SERVER_HOST = "10.250.120.214"
 SERVER_PORT = 5555
 
 
