@@ -561,7 +561,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="10.250.120.214", help="Server IP address (default: 10.250.120.214)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
     parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
-                        help="Protocol to use: 'json' or 'custom' (default: json)")
+                        help="Protocol to use: 'json' or 'custom' (default: custom)")
 
     args = parser.parse_args()
 
