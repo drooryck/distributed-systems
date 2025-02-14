@@ -4,7 +4,8 @@ JoChat is a distributed messaging system that supports user authentication, mess
 ## 🚀 Quick Setup & Deployment  
 To set up and run JoChat, follow these steps in a **fresh virtual environment**:
 
-```pip install -r requirements.txt
+```
+pip install -r requirements.txt
 make run-server  # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)``
 make run-client
 ```
