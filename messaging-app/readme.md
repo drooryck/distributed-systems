@@ -73,6 +73,7 @@ The client is responsible for:
     "password": "hashedpassword"
   }
 }
+```
 
 #### 🔑 Security & Performance
 - **Uses a 4-byte big-endian length prefix** to ensure message boundaries are correctly interpreted.  
