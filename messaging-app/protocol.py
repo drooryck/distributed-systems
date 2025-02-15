@@ -1,18 +1,24 @@
 import struct
 import json
 
+###############################################################################
+# Message Class
+###############################################################################
 class Message:
-    """ Represents a generic message with a type and data payload. """
+    """Represents a generic message with a type and data payload."""
     def __init__(self, msg_type, data):
-        self.msg_type = msg_type
-        self.data = data
+        self.msg_type = msg_type  # e.g. "login", "send_message", etc.
+        self.data = data          # For responses, you may include "status":"ok"/"error", "msg", etc.
 
     def __repr__(self):
         return f"<Message type={self.msg_type}, data={self.data}>"
 
+###############################################################################
+# JSONProtocolHandler (fallback)
+###############################################################################
 class JSONProtocolHandler:
-    """ Handles sending and receiving JSON-based messages with length-prefixing. """
-    def send(self, conn, message: Message):
+    """Encodes and decodes messages as JSON with a 4-byte length prefix."""
+    def send(self, conn, message: Message, is_response=False):
         payload = {
             "msg_type": message.msg_type,
             "data": message.data
@@ -34,23 +40,26 @@ class JSONProtocolHandler:
         payload = json.loads(data.decode("utf-8"))
         return Message(payload["msg_type"], payload["data"])
 
-import struct
-from protocol import Message  # or wherever your Message class is defined
-
+###############################################################################
+# CustomProtocolHandler
+###############################################################################
 class CustomProtocolHandler:
     """
-    Converts between your internal Message(msg_type, data=dict)
-    and a minimal binary format:
+    Converts between Message objects and our custom binary format:
     
-      [op_id: 1 byte] + [fields...]
+      [op_id:1 byte][is_response:1 byte] + [payload...]
     
-    Each operation's fields are encoded/decoded per your specification.
+    Where op_id is the operation code (1=signup, 2=login, ... 11=reset_db),
+    and is_response is (0=request, 1=response).
+    
+    For requests, parse the relevant fields. For responses, we typically parse:
+      [success:1 byte] (1=ok, 0=error)
+      If success=1, parse success-specific fields; if success=0, parse error reason.
+      Optionally, a "msg" field can be appended, as a [msg_len:1 byte][msg UTF-8].
     """
-
     def __init__(self):
-        # Map operation code -> msg_type
-        self.command_to_msgtype = {
-            1:  "signup",              # example if you choose
+        self.op_to_name = {
+            1:  "signup",
             2:  "login",
             3:  "logout",
             4:  "count_unread",
@@ -61,453 +70,721 @@ class CustomProtocolHandler:
             9:  "delete_messages",
             10: "delete_account",
             11: "reset_db",
-            12: "response",
-            255:"failure"
+            255:"failure"  # fallback
         }
-        # Inverse map: msg_type -> operation code
-        self.msgtype_to_command = {v:k for k,v in self.command_to_msgtype.items()}
+        self.name_to_op = {v:k for k,v in self.op_to_name.items()}
 
-    ############################################################
-    # Public methods: send() and receive()
-    ############################################################
-
-    def send(self, conn, message: Message):
+    ###########################################################################
+    # Public: send() / receive()
+    ###########################################################################
+    def send(self, conn, message: Message, is_response: bool):
         """
-        Encode a high-level `message` into the custom binary wire format
-        and send it over 'conn'.
-        
-        Example usage from client:
-          msg = Message("send_message", {
-              "sender": "Alice",
-              "recipient": "Bob",
-              "content": "Hello, Bob!"
-          })
-          self.send(sock, msg)
+        Encodes a Message (with a known msg_type) into the custom wire format:
+          [op_id:1 byte][is_response:1 byte][payload...]
         """
-        op_id = self.msgtype_to_command.get(message.msg_type, 255) # default to error
-        data = message.data or {}
-
-        # Build the binary packet
-        packet = self._encode_packet(op_id, message.msg_type, data)
-        print(packet)
-
-        # Send the result
+        print(message)
+        op_id = self.name_to_op.get(message.msg_type, 255)  # fallback: 255 => failure
+        print('op_id', op_id)
+        print(f"Sending message: msg_type={message.msg_type}, op_id={op_id}, is_response={is_response}")
+        # Build payload based on whether it's a request or a response
+        payload = self._encode_payload(message.msg_type, is_response, message.data)
+        # The final packet = [op_id:1] + [is_response:1] + payload
+        header = struct.pack("!B", op_id) + struct.pack("!B", 1 if is_response else 0)
+        packet = header + payload
+        print(f"Packet to send: {packet}")
         conn.sendall(packet)
 
     def receive(self, conn):
         """
-        Read from 'conn' and decode a single message in the custom binary
-        wire format, returning a Message(msg_type, data=...).
-        If nothing is available (e.g. closed socket), return None.
+        Reads 2 bytes for [op_id, is_response], then decodes payload accordingly.
+        Returns a Message object or None on error/closed.
         """
-        # First, read 1 byte for the operation ID
-        op_id_raw = self._recv_exact(conn, 1)
-        if not op_id_raw:
-            return None  # means connection closed or no data
-
-        op_id = op_id_raw[0]  # single byte
-
-        # Based on the op_id, parse the rest
-        msg_type = self.command_to_msgtype.get(op_id, "unknown_command")
-
-        # We'll parse the body according to the recognized operation
-        data = self._decode_packet(conn, op_id, msg_type)
-        if data is None:
-            # In case of partial data or error, return None
+        print()
+        header = self._recv_exact(conn, 2)
+        if not header:
             return None
-
-        # Return a standard Message object
+        op_id, resp_flag = struct.unpack("!BB", header)
+        is_response = (resp_flag == 1)
+        msg_type = self.op_to_name.get(op_id, "unknown")
+        print(f"Received message: op_id={op_id}, msg_type={msg_type}, is_response={is_response}")
+        data = self._decode_payload(conn, msg_type, is_response)
+        if data is None:
+            return None
         return Message(msg_type, data)
 
-    ############################################################
-    # Internal helper: _encode_packet
-    ############################################################
-
-    def _encode_packet(self, op_id, msg_type, data):
+    ###########################################################################
+    # Internal: _encode_payload
+    ###########################################################################
+    def _encode_payload(self, msg_type: str, is_response: bool, data: dict):
         """
-        Given an op_id and data, build the minimal binary format
-        matching your protocol spec for that operation.
+        Build the payload portion (everything after [op_id, is_response]).
+        Requests and responses have different formats per operation.
         """
-        # Start with the 1-byte op_id
-        packet = struct.pack("!B", op_id)
+        packet = b""
+        if not is_response:
+            # ------------------ REQUEST ENCODING ------------------
+            if msg_type == "signup":
+                # [username_len:1][username][password_len:1][password]
+                username = data.get("username", "")
+                password = data.get("password", "")
+                u_bytes = username.encode("utf-8")
+                p_bytes = password.encode("utf-8")
+                packet += struct.pack("!B", len(u_bytes)) + u_bytes
+                packet += struct.pack("!B", len(p_bytes)) + p_bytes
 
-        if msg_type == "signup":
-            # Operation ID = 1
-            # [op_id:1] [username_length:1] [username] [password_length:1] [password]
-            username = data.get("username", "")
-            password = data.get("password", "")
-            user_bytes = username.encode("utf-8")
-            pass_bytes = password.encode("utf-8")
+            elif msg_type == "login":
+                # example: [username_len:1][username][pw_len:1][pw]
+                username = data.get("username", "")
+                password = data.get("password", "")
+                u_bytes = username.encode("utf-8")
+                p_bytes = password.encode("utf-8")
+                packet += struct.pack("!B", len(u_bytes)) + u_bytes
+                packet += struct.pack("!B", len(p_bytes)) + p_bytes
 
-            packet += struct.pack("!B", len(user_bytes))
-            packet += user_bytes
-            packet += struct.pack("!B", len(pass_bytes))
-            packet += pass_bytes
+            elif msg_type == "logout":
+                pass
 
-        elif msg_type == "login":
-            # Operation ID = 2
-            # [op_id:1] [username_length:1] [username] [password_length:1] [password]
-            username = data.get("username", "")
-            pw_hash  = data.get("password", "")
-            unread_count = data.get("unread_count", "")
+            elif msg_type == "count_unread":
+                pass
 
-            user_bytes = username.encode("utf-8")
-            pw_bytes   = pw_hash.encode("utf-8")
-            unread_count_bytes = unread_count.encode("utf-8")
+            elif msg_type == "send_message":
+                # [sender_len:1][sender][recipient_len:1][recipient][msg_len:2][message]
+                sender = data.get("sender", "")
+                recipient = data.get("recipient", "")
+                content = data.get("content", "")
+                s_bytes = sender.encode("utf-8")
+                r_bytes = recipient.encode("utf-8")
+                c_bytes = content.encode("utf-8")
+                packet += struct.pack("!B", len(s_bytes)) + s_bytes
+                packet += struct.pack("!B", len(r_bytes)) + r_bytes
+                packet += struct.pack("!H", len(c_bytes)) + c_bytes
 
-            packet += struct.pack("!B", len(user_bytes))
-            packet += user_bytes
-            packet += struct.pack("!B", len(pw_bytes))
-            packet += pw_bytes
-            packet += struct.pack("!H", len(unread_count_bytes))
-            packet += unread_count_bytes
+            elif msg_type == "send_messages_to_client":
+                pass
 
-        elif msg_type == "logout":
-            # Operation ID = 3
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "fetch_away_msgs":
+                # [limit:1]
+                limit = data.get("limit", 10)
+                if limit > 255:
+                    limit = 255
+                packet += struct.pack("!B", limit)
 
-        elif msg_type == "count_unread":
-            # Operation ID = 4
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "list_accounts":
+                # [count:1][start:4][pattern_len:1][pattern]
+                count = data.get("count", 10)
+                start = data.get("start", 0)
+                pattern = data.get("pattern", "")
+                if count > 255:
+                    count = 255
+                pat_bytes = pattern.encode("utf-8")
+                if len(pat_bytes) > 255:
+                    pat_bytes = pat_bytes[:255]
+                packet += struct.pack("!B", count)
+                packet += struct.pack("!I", start)
+                packet += struct.pack("!B", len(pat_bytes)) + pat_bytes
 
-        elif msg_type == "send_message":
-            # [op_id=5]
-            # [sender_len:1][sender]
-            # [recipient_len:1][recipient]
-            # [msg_len:2][message]
-            
-            sender = data.get("sender", "")
-            recipient = data.get("recipient", "")
-            content   = data.get("content", "")
-            
-            s_bytes = sender.encode("utf-8")
-            r_bytes = recipient.encode("utf-8")
-            c_bytes = content.encode("utf-8")
-            
-            packet += struct.pack("!B", len(s_bytes))
-            packet += s_bytes
-            packet += struct.pack("!B", len(r_bytes))
-            packet += r_bytes
-            packet += struct.pack("!H", len(c_bytes))
-            packet += c_bytes
+            elif msg_type == "delete_messages":
+                # [count:1][each msg_id:4]
+                msg_ids = data.get("message_ids_to_delete", [])
+                cnt = len(msg_ids)
+                if cnt > 255:
+                    cnt = 255
+                packet += struct.pack("!B", cnt)
+                for mid in msg_ids[:cnt]:
+                    packet += struct.pack("!I", mid)
 
-        elif msg_type == "send_messages_to_client":
-            # Operation ID = 6
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "delete_account":
+                pass
 
-        elif msg_type == "fetch_away_msgs":
-            # Operation ID = 7
-            # [op_id:1] [limit:1]
-            limit = data.get("limit", 10)
-            if limit > 255:
-                limit = 255
-            packet += struct.pack("!B", limit)
+            elif msg_type == "reset_db":
+                pass
 
-        elif msg_type == "list_accounts":
-            # Operation ID = 8
-            # [op_id:1] [count:1] [start:4] [pattern_len:1] [pattern_bytes]
-            pattern = data.get("pattern", "")
-            start   = data.get("start", 0)   # 4-byte offset
-            count   = data.get("count", 10)  # 1-byte limit
-
-            if count > 255:
-                count = 255
-            packet += struct.pack("!B", count)      # 1 byte
-            packet += struct.pack("!I", start)      # 4 bytes, big-endian
-
-            pattern_bytes = pattern.encode("utf-8")
-            if len(pattern_bytes) > 255:
-                pattern_bytes = pattern_bytes[:255]
-            packet += struct.pack("!B", len(pattern_bytes))
-            packet += pattern_bytes
-
-        elif msg_type == "delete_messages":
-            # Operation ID = 9
-            # [op_id:1] [count:1] [msg_id_1:4] ... [msg_id_N:4]
-            message_ids = data.get("message_ids_to_delete", [])
-            count = len(message_ids)
-            if count > 255:
-                count = 255
-
-            packet += struct.pack("!B", count)
-            for msg_id in message_ids[:count]:
-                packet += struct.pack("!I", msg_id)
-
-        elif msg_type == "delete_account":
-            # Operation ID = 10
-            # [op_id:1] -> no extra fields
-            pass
-
-        elif msg_type == "reset_db":
-            # Operation ID = 11
-            # [op_id:1] -> no extra fields
-            pass
-
-        elif msg_type == "response":
-            """
-            [op_id=12]
-            [success=1 byte]  (0=error, 1=ok)
-            [msg_length=2 bytes]
-            [msg= msg_length bytes, UTF-8]
-            """
-            success_flag = 1 if data.get("status") == "ok" else 0
-            msg_bytes = data.get("msg", "").encode("utf-8")
-            msg_len = len(msg_bytes)
-            if msg_len > 65535:  # Ensure it fits in 2 bytes
-                msg_bytes = msg_bytes[:65535]
-                msg_len = 65535
-
-            packet += struct.pack("!B", success_flag)  # 1 byte
-            packet += struct.pack("!H", msg_len)  # 2 bytes for length
-            packet += msg_bytes  # Message content
-
-        elif msg_type == "failure":
-            """
-            [op_id=255]
-            [error_len=2 bytes]
-            [error_message: error_len bytes (UTF-8)]
-            """
-            error_msg = data.get("error_message", "unknown failure").encode("utf-8")
-            error_len = len(error_msg)
-            if error_len > 65535:  # Ensure it fits in 2 bytes
-                error_msg = error_msg[:65535]
-                error_len = 65535
-
-            packet += struct.pack("!H", error_len)  # 2 bytes for length
-            packet += error_msg  # Error message content
-
-
+            else:
+                # fallback/failure?
+                pass
         else:
-            # Unrecognized or not implemented
-            pass
+            # ------------------ RESPONSE ENCODING ------------------
+            def encode_string_field(msg_text: str) -> bytes:
+                """Encodes a short text field as [length:1][UTF-8]."""
+                if not msg_text:
+                    return struct.pack("!B", 0)
+                b = msg_text.encode("utf-8")
+                if len(b) > 255:
+                    b = b[:255]
+                return struct.pack("!B", len(b)) + b
+
+            # We'll interpret data["status"] as "ok" => success=1, else success=0
+            success_byte = 1 if data.get("status", "error") == "ok" else 0
+
+            if msg_type == "signup":
+                # [success:1][msg]
+                packet += struct.pack("!B", success_byte)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "login":
+                # [success:1][unread_count:2][msg]
+                packet += struct.pack("!B", success_byte)
+                print('packet so far', packet)
+        
+                unread = data.get("unread_count", 0) # if there is no unread_count, give -1 back
+                packet += struct.pack("!H", unread)
+
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "logout":
+                # [success:1][msg]
+                packet += struct.pack("!B", success_byte)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "count_unread":
+                # [success:1][unread_count:2][msg]
+                packet += struct.pack("!B", success_byte)
+                if success_byte == 1:
+                    packet += struct.pack("!H", data.get("unread_count", 0))
+                else:
+                    packet += struct.pack("!H", 0)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "send_message":
+                # [success:1][msg]
+                packet += struct.pack("!B", success_byte)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "send_messages_to_client":
+                # If success=1 => [success:1][msg_count:1][each message...] + optional trailing msg?
+                # If success=0 => [success:1=0][msg]
+                packet += struct.pack("!B", success_byte)
+                if success_byte == 1:
+                    messages = data.get("msg", [])
+                    cnt = len(messages)
+                    if cnt > 255:
+                        cnt = 255
+                    packet += struct.pack("!B", cnt)
+                    for m in messages[:cnt]:
+                        mid = m.get("id", 0)
+                        snd = m.get("sender", "")
+                        content = m.get("content", "")
+                        packet += struct.pack("!I", mid)
+                        s_b = snd.encode("utf-8")
+                        if len(s_b) > 255:
+                            s_b = s_b[:255]
+                        packet += struct.pack("!B", len(s_b)) + s_b
+                        c_b = content.encode("utf-8")
+                        packet += struct.pack("!H", len(c_b)) + c_b
+                    # If you want an extra "msg" field after success data:
+                    packet += encode_string_field(data.get("extra_msg", ""))
+                else:
+                    # if success=0 => just an error message
+                    packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "fetch_away_msgs":
+                # if success=1 => [success:1][msg_count:1][each message] plus a final text field?
+                packet += struct.pack("!B", success_byte)
+                if success_byte == 1:
+                    messages = data.get("msg", [])
+                    cnt = len(messages)
+                    if cnt > 255:
+                        cnt = 255
+                    packet += struct.pack("!B", cnt)
+                    for m in messages[:cnt]:
+                        mid = m.get("id", 0)
+                        snd = m.get("sender", "")
+                        content = m.get("content", "")
+                        packet += struct.pack("!I", mid)
+                        s_b = snd.encode("utf-8")
+                        packet += struct.pack("!B", len(s_b)) + s_b
+                        c_b = content.encode("utf-8")
+                        packet += struct.pack("!H", len(c_b)) + c_b
+                    packet += encode_string_field(data.get("msg", ""))
+                else:
+                    packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "list_accounts":
+                # success=1 => [success:1][acct_count:1] [ each: (acct_id:4)(uname_len:1)(uname) ] + msg
+                packet += struct.pack("!B", success_byte)
+                if success_byte == 1:
+                    accounts = data.get("users", [])
+                    cnt = len(accounts)
+                    if cnt > 255:
+                        cnt = 255
+                    packet += struct.pack("!B", cnt)
+                    for (acct_id, uname) in accounts[:cnt]:
+                        uname_b = uname.encode("utf-8")
+                        if len(uname_b) > 255:
+                            uname_b = uname_b[:255]
+                        packet += struct.pack("!I", acct_id)
+                        packet += struct.pack("!B", len(uname_b)) + uname_b
+                    packet += encode_string_field(data.get("msg", ""))
+                else:
+                    packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "delete_messages":
+                # [success:1] if success => [deleted_count:1], then a final msg field
+                packet += struct.pack("!B", success_byte)
+                if success_byte == 1:
+                    deleted_cnt = data.get("deleted_count", 0)
+                    packet += struct.pack("!B", deleted_cnt)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "delete_account":
+                # [success:1][msg]
+                packet += struct.pack("!B", success_byte)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "reset_db":
+                # [success:1][msg]
+                packet += struct.pack("!B", success_byte)
+                packet += encode_string_field(data.get("msg", ""))
+
+            elif msg_type == "failure":
+                # [error_len:2][error_message]
+                err_b = data.get("error_message", "unknown failure").encode("utf-8")
+                if len(err_b) > 65535:
+                    err_b = err_b[:65535]
+                packet += struct.pack("!H", len(err_b))
+                packet += err_b
+
+            else:
+                pass
 
         return packet
-    ############################################################
-    # Internal helper: _decode_packet
-    ############################################################
 
-    def _decode_packet(self, conn, op_id, msg_type):
-        """
-        Read the rest of the packet from the socket,
-        parse fields according to the operation ID, 
-        and return a dict `data`.
-        """
+    ###########################################################################
+    # Internal: _decode_payload
+    ###########################################################################
+    def _decode_payload(self, conn, msg_type, is_response):
+        """Reads payload fields after op_id + is_response and returns a data dict."""
         data = {}
+        if not is_response:
+            # ----------------- REQUEST DECODING -----------------
+            if msg_type == "signup":
+                # [username_len:1][username][password_len:1][password]
+                ulen_b = self._recv_exact(conn, 1)
+                if not ulen_b:
+                    return None
+                ulen = ulen_b[0]
+                uname_bytes = self._recv_exact(conn, ulen)
+                if not uname_bytes:
+                    return None
+                username = uname_bytes.decode("utf-8")
 
-        if msg_type == "signup":
-            # [op_id:1] [username_len:1] [username] [password_len:1] [password]
-            user_len = self._recv_exact(conn, 1)
-            if not user_len: return None
-            user_len = user_len[0]
+                plen_b = self._recv_exact(conn, 1)
+                if not plen_b:
+                    return None
+                plen = plen_b[0]
+                pw_bytes = self._recv_exact(conn, plen)
+                if not pw_bytes:
+                    return None
+                password = pw_bytes.decode("utf-8")
 
-            username = self._recv_exact(conn, user_len)
-            if not username: return None
-            username_str = username.decode("utf-8")
+                data["username"] = username
+                data["password"] = password
 
-            pass_len = self._recv_exact(conn, 1)
-            if not pass_len: return None
-            pass_len = pass_len[0]
+            elif msg_type == "login":
+                # [username_len:1][username][password_len:1][password]
+                ulen_b = self._recv_exact(conn, 1)
+                if not ulen_b:
+                    return None
+                ulen = ulen_b[0]
+                uname_bytes = self._recv_exact(conn, ulen)
+                if not uname_bytes:
+                    return None
+                username = uname_bytes.decode("utf-8")
 
-            password = self._recv_exact(conn, pass_len)
-            if not password: return None
-            password_str = password.decode("utf-8")
+                plen_b = self._recv_exact(conn, 1)
+                if not plen_b:
+                    return None
+                plen = plen_b[0]
+                pw_bytes = self._recv_exact(conn, plen)
+                if not pw_bytes:
+                    return None
+                password = pw_bytes.decode("utf-8")
 
-            data["username"] = username_str
-            data["password"] = password_str
+                data["username"] = username
+                data["password"] = password
 
-        elif msg_type == "login":
-            # [op_id:1] [username_len:1] [username] [password_len:1] [password] [unread_count:4]
-            ul_raw = self._recv_exact(conn, 1)
-            if not ul_raw: return None
-            ulen = ul_raw[0]
+            elif msg_type == "logout":
+                pass
 
-            uname = self._recv_exact(conn, ulen)
-            if not uname: return None
-            username_str = uname.decode("utf-8")
+            elif msg_type == "count_unread":
+                pass
 
-            pl_raw = self._recv_exact(conn, 1)
-            if not pl_raw: return None
-            plen = pl_raw[0]
+            elif msg_type == "send_message":
+                slen_b = self._recv_exact(conn, 1)
+                if not slen_b:
+                    return None
+                slen = slen_b[0]
+                s_bytes = self._recv_exact(conn, slen)
+                if not s_bytes:
+                    return None
+                sender = s_bytes.decode("utf-8")
 
-            pw = self._recv_exact(conn, plen)
-            if not pw: return None
-            password_str = pw.decode("utf-8")
+                rlen_b = self._recv_exact(conn, 1)
+                if not rlen_b:
+                    return None
+                rlen = rlen_b[0]
+                r_bytes = self._recv_exact(conn, rlen)
+                if not r_bytes:
+                    return None
+                recipient = r_bytes.decode("utf-8")
 
-            # ✅ Fix: Read unread_count as a 4-byte integer
-            ur_raw = self._recv_exact(conn, 4)
-            if not ur_raw: return None
-            unread_count = int.from_bytes(ur_raw, byteorder="big")  # Convert bytes to integer
+                msg_len_b = self._recv_exact(conn, 2)
+                if not msg_len_b:
+                    return None
+                (msg_len,) = struct.unpack("!H", msg_len_b)
+                content_bytes = self._recv_exact(conn, msg_len)
+                if not content_bytes:
+                    return None
+                content = content_bytes.decode("utf-8")
 
-            data["username"] = username_str
-            data["password"] = password_str
-            data["unread_count"] = unread_count  # ✅ Now properly assigned
+                data["sender"] = sender
+                data["recipient"] = recipient
+                data["content"] = content
 
-        elif msg_type == "logout":
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "send_messages_to_client":
+                pass
 
-        elif msg_type == "count_unread":
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "fetch_away_msgs":
+                limit_b = self._recv_exact(conn, 1)
+                if not limit_b:
+                    return None
+                data["limit"] = limit_b[0]
 
-        elif msg_type == "send_message":
-            # [op_id=5]
-            # [sender_len:1][sender]
-            # [recipient_len:1][recipient]
-            # [msg_len:2][message]
-            
-            slen_raw = self._recv_exact(conn, 1)
-            if not slen_raw: return None
-            slen = slen_raw[0]
-            sender_bytes = self._recv_exact(conn, slen)
-            if not sender_bytes: return None
-            sender_str = sender_bytes.decode("utf-8")
+            elif msg_type == "list_accounts":
+                c_b = self._recv_exact(conn, 1)
+                if not c_b:
+                    return None
+                cnt = c_b[0]
+                start_b = self._recv_exact(conn, 4)
+                if not start_b:
+                    return None
+                (start_val,) = struct.unpack("!I", start_b)
 
-            rlen_raw = self._recv_exact(conn, 1)
-            if not rlen_raw: return None
-            rlen = rlen_raw[0]
-            recipient_bytes = self._recv_exact(conn, rlen)
-            if not recipient_bytes: return None
-            recipient_str = recipient_bytes.decode("utf-8")
+                pat_len_b = self._recv_exact(conn, 1)
+                if not pat_len_b:
+                    return None
+                pat_len = pat_len_b[0]
+                pat_bytes = b""
+                if pat_len > 0:
+                    pat_bytes = self._recv_exact(conn, pat_len)
+                    if not pat_bytes:
+                        return None
+                data["count"] = cnt
+                data["start"] = start_val
+                data["pattern"] = pat_bytes.decode("utf-8")
 
-            msg_len_raw = self._recv_exact(conn, 2)
-            if not msg_len_raw: return None
-            (msg_len,) = struct.unpack("!H", msg_len_raw)
-            content_bytes = self._recv_exact(conn, msg_len)
-            if not content_bytes: return None
-            content_str = content_bytes.decode("utf-8")
+            elif msg_type == "delete_messages":
+                c_b = self._recv_exact(conn, 1)
+                if not c_b:
+                    return None
+                cval = c_b[0]
+                msg_ids = []
+                for _ in range(cval):
+                    id_b = self._recv_exact(conn, 4)
+                    if not id_b:
+                        return None
+                    (mid,) = struct.unpack("!I", id_b)
+                    msg_ids.append(mid)
+                data["message_ids_to_delete"] = msg_ids
 
-            data["sender"] = sender_str
-            data["recipient"] = recipient_str
-            data["content"] = content_str
+            elif msg_type == "delete_account":
+                pass
 
-        elif msg_type == "send_messages_to_client":
-            # [op_id:1] -> no extra fields
-            pass
+            elif msg_type == "reset_db":
+                pass
 
-        elif msg_type == "fetch_away_msgs":
-            # [op_id:1] [limit:1]
-            limit_raw = self._recv_exact(conn, 1)
-            if not limit_raw: return None
-            data["limit"] = limit_raw[0]
+            elif msg_type == "failure":
+                # fallback
+                elen_b = self._recv_exact(conn, 2)
+                if not elen_b:
+                    return None
+                (elen,) = struct.unpack("!H", elen_b)
+                err_b = self._recv_exact(conn, elen)
+                if not err_b:
+                    return None
+                data["error_message"] = err_b.decode("utf-8")
 
-        elif msg_type == "list_accounts":
-            # [op_id:1] [count:1] [start:4] [pattern_len:1] [pattern_bytes]
-            cnt_raw = self._recv_exact(conn, 1)
-            if not cnt_raw: return None
-            count_val = cnt_raw[0]
-
-            start_raw = self._recv_exact(conn, 4)
-            if not start_raw: return None
-            (start_val,) = struct.unpack("!I", start_raw)
-
-            pat_len_raw = self._recv_exact(conn, 1)
-            if not pat_len_raw: return None
-            pat_len = pat_len_raw[0]
-
-            pattern_bytes = b""
-            if pat_len > 0:
-                p = self._recv_exact(conn, pat_len)
-                if not p: return None
-                pattern_bytes = p
-
-            data["count"]   = count_val
-            data["start"]   = start_val
-            data["pattern"] = pattern_bytes.decode("utf-8")
-
-        elif msg_type == "delete_messages":
-            # [op_id:1] [count:1] [msg_id_1:4] ... [msg_id_N:4]
-            c_raw = self._recv_exact(conn, 1)
-            if not c_raw: return None
-            cval = c_raw[0]
-
-            msg_ids = []
-            for _ in range(cval):
-                chunk = self._recv_exact(conn, 4)
-                if not chunk: return None
-                (mid,) = struct.unpack("!I", chunk)
-                msg_ids.append(mid)
-
-            data["message_ids_to_delete"] = msg_ids
-
-        elif msg_type == "delete_account":
-            # [op_id:1] -> no extra fields
-            pass
-
-        elif msg_type == "reset_db":
-            # [op_id:1] -> no extra fields
-            pass
-
-        # ---------- response (12) ----------
-        elif msg_type == "response":
-            """
-            [op_id=12]
-            [success=1 byte]  (0=error, 1=ok)
-            [msg_length=2 bytes]
-            [msg= msg_length bytes, UTF-8]
-            """
-            success_raw = self._recv_exact(conn, 1)
-            if not success_raw:
+            else:
+                # unknown request
                 return None
-            success_flag = success_raw[0]
-
-            msg_len_raw = self._recv_exact(conn, 2)
-            if not msg_len_raw:
-                return None
-            (msg_len,) = struct.unpack("!H", msg_len_raw)
-
-            # Receive 'msg_len' bytes, then decode to UTF-8
-            resp_bytes = self._recv_exact(conn, msg_len)
-            if not resp_bytes:
-                return None
-            resp_str = resp_bytes.decode("utf-8")
-
-      
-            data["status"] = "ok" if success_flag == 1 else "error"
-            data["msg"]    = resp_str
-        
-
-        # ---------- failure (255) ----------
-        elif msg_type == "failure":
-            """
-            [op_id=255]
-            [error_len=2 bytes]
-            [error_message: error_len bytes (UTF-8)]
-            """
-            elen_raw = self._recv_exact(conn, 2)
-            if not elen_raw:
-                return None
-            (error_len,) = struct.unpack("!H", elen_raw)
-
-            err_bytes = self._recv_exact(conn, error_len)
-            if not err_bytes:
-                return None
-            err_str = err_bytes.decode("utf-8")
-
-            data["error_message"] = err_str
 
         else:
-            # Unknown or unimplemented
-            return None
+            # ----------------- RESPONSE DECODING -----------------
+            # We'll interpret the first byte as success=1 or 0
+            # Then decode operation-specific fields accordingly.
+            def read_string_field():
+                length_b = self._recv_exact(conn, 1)
+                if not length_b:
+                    return None
+                length_val = length_b[0]
+                if length_val == 0:
+                    return ""
+                txt_b = self._recv_exact(conn, length_val)
+                if not txt_b:
+                    return None
+                return txt_b.decode("utf-8")
+
+            if msg_type == "signup":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "login":
+                # [success:1][unread_count:2][msg]
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+
+                unread_raw = self._recv_exact(conn, 2)
+                if not unread_raw:
+                    return None
+                (unread_count,) = struct.unpack("!H", unread_raw)
+                data["unread_count"] = unread_count
+
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "logout":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                data["status"] = "ok" if success_b[0] == 1 else "error"
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "count_unread":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+
+                unread_raw = self._recv_exact(conn, 2)
+                if not unread_raw:
+                    return None
+                (unread_count,) = struct.unpack("!H", unread_raw)
+                data["unread_count"] = unread_count
+
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "send_message":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                data["status"] = "ok" if success_b[0] == 1 else "error"
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "send_messages_to_client":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+                if success == 1:
+                    c_b = self._recv_exact(conn, 1)
+                    if not c_b:
+                        return None
+                    msg_count = c_b[0]
+                    msgs = []
+                    for _ in range(msg_count):
+                        id_b = self._recv_exact(conn, 4)
+                        if not id_b:
+                            return None
+                        (mid,) = struct.unpack("!I", id_b)
+                        slen_b = self._recv_exact(conn, 1)
+                        if not slen_b:
+                            return None
+                        slen = slen_b[0]
+                        s_bytes = self._recv_exact(conn, slen)
+                        if not s_bytes:
+                            return None
+                        sender_str = s_bytes.decode("utf-8")
+
+                        mlen_b = self._recv_exact(conn, 2)
+                        if not mlen_b:
+                            return None
+                        (mlen,) = struct.unpack("!H", mlen_b)
+                        content_bytes = self._recv_exact(conn, mlen)
+                        if not content_bytes:
+                            return None
+                        content_str = content_bytes.decode("utf-8")
+
+                        msgs.append({"id": mid, "sender": sender_str, "content": content_str})
+                    data["msg"] = msgs
+                    # optional trailing message if you do so:
+                    # data["extra_msg"] = read_string_field() or something
+                else:
+                    msg_str = read_string_field()
+                    if msg_str is None:
+                        return None
+                    data["msg"] = msg_str
+
+            elif msg_type == "fetch_away_msgs":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+                if success == 1:
+                    c_b = self._recv_exact(conn, 1)
+                    if not c_b:
+                        return None
+                    msg_count = c_b[0]
+                    msgs = []
+                    for _ in range(msg_count):
+                        id_b = self._recv_exact(conn, 4)
+                        if not id_b:
+                            return None
+                        (mid,) = struct.unpack("!I", id_b)
+                        slen_b = self._recv_exact(conn, 1)
+                        if not slen_b:
+                            return None
+                        slen = slen_b[0]
+                        s_bytes = self._recv_exact(conn, slen)
+                        if not s_bytes:
+                            return None
+                        sender_str = s_bytes.decode("utf-8")
+
+                        mlen_b = self._recv_exact(conn, 2)
+                        if not mlen_b:
+                            return None
+                        (mlen,) = struct.unpack("!H", mlen_b)
+                        msg_b = self._recv_exact(conn, mlen)
+                        if not msg_b:
+                            return None
+                        content_str = msg_b.decode("utf-8")
+
+                        msgs.append({"id": mid, "sender": sender_str, "content": content_str})
+                    data["msg"] = msgs
+                    # if you want to parse an extra field for success, do it here
+                    # data["tail_msg"] = read_string_field()
+
+                else:
+                    # parse error message
+                    err_str = read_string_field()
+                    if err_str is None:
+                        return None
+                    data["msg"] = err_str
+
+            elif msg_type == "list_accounts":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+                if success == 1:
+                    c_b = self._recv_exact(conn, 1)
+                    if not c_b:
+                        return None
+                    acct_count = c_b[0]
+                    users = []
+                    for _ in range(acct_count):
+                        id_b = self._recv_exact(conn, 4)
+                        if not id_b:
+                            return None
+                        (acct_id,) = struct.unpack("!I", id_b)
+                        ulen_b = self._recv_exact(conn, 1)
+                        if not ulen_b:
+                            return None
+                        ulen = ulen_b[0]
+                        uname_b = self._recv_exact(conn, ulen)
+                        if not uname_b:
+                            return None
+                        uname = uname_b.decode("utf-8")
+                        users.append((acct_id, uname))
+                    data["users"] = users
+                    # optionally parse trailing msg
+                    # data["msg"] = read_string_field()
+                else:
+                    # parse error message
+                    err_str = read_string_field()
+                    if err_str is None:
+                        return None
+                    data["msg"] = err_str
+
+            elif msg_type == "delete_messages":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                success = success_b[0]
+                data["status"] = "ok" if success == 1 else "error"
+                if success == 1:
+                    dcount_b = self._recv_exact(conn, 1)
+                    if not dcount_b:
+                        return None
+                    data["deleted_count"] = dcount_b[0]
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "delete_account":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                data["status"] = "ok" if success_b[0] == 1 else "error"
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "reset_db":
+                success_b = self._recv_exact(conn, 1)
+                if not success_b:
+                    return None
+                data["status"] = "ok" if success_b[0] == 1 else "error"
+                msg_str = read_string_field()
+                if msg_str is None:
+                    return None
+                data["msg"] = msg_str
+
+            elif msg_type == "failure":
+                # [error_len:2][error_bytes]
+                elen_b = self._recv_exact(conn, 2)
+                if not elen_b:
+                    return None
+                (elen,) = struct.unpack("!H", elen_b)
+                err_b = self._recv_exact(conn, elen)
+                if not err_b:
+                    return None
+                data["error_message"] = err_b.decode("utf-8")
+
+            else:
+                return None
 
         return data
 
-
-    ############################################################
+    ###########################################################################
     # Utility: _recv_exact
-    ############################################################
-
+    ###########################################################################
     def _recv_exact(self, conn, nbytes):
         """
-        Read exactly 'nbytes' bytes from the socket.
-        Return None if we cannot (connection closed).
+        Reads exactly 'nbytes' bytes from 'conn'. Returns None if the connection
+        closes or not enough data arrives.
         """
         buf = bytearray()
         while len(buf) < nbytes:
+            #print(len(buf), nbytes)
             chunk = conn.recv(nbytes - len(buf))
+            #print(chunk)
             if not chunk:
                 return None
             buf.extend(chunk)

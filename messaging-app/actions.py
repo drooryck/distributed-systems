@@ -27,39 +27,43 @@ class ActionHandler:
         }
         action = action_map.get(message.msg_type)
         if action:
+            #print('action found', action_map.get(message.msg_type))
             action(client_id, message.data, conn)
         else:
-            self.protocol_handler.send(conn, Message("response", {"status": "error", "msg": "Unknown action"}))
+            #print('couldnt find that action mate')
+            self.protocol_handler.send(conn, Message("signup", {"status": "error", "msg": "Unknown action"}), is_response=1)
 
     # 1) signup
     def _action_signup(self, client_id, data, conn):
         username, password = data.get("username"), data.get("password")
         if not username or not password:
-            self.protocol_handler.send(conn, Message("response", {"status": "error", "msg": "Invalid data"}))
+            self.protocol_handler.send(conn, Message("signup", {"status": "error", "msg": "Invalid data"}), is_response=1)
             return
         
         result = self.db.execute("SELECT id FROM users WHERE username=?", (username,))
         if result:
-            self.protocol_handler.send(conn, Message("response", {"status": "error", "msg": "Username taken"}))
+            self.protocol_handler.send(conn, Message("signup", {"status": "error", "msg": "Username taken"}), is_response=1)
             return
 
         self.db.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password), commit=True)
-        self.protocol_handler.send(conn, Message("response", {"status": "ok", "msg": "Signup successful"}))
+        self.protocol_handler.send(conn, Message("signup", {"status": "ok", "msg": "Signup successful"}), is_response=1)
 
 
     # 2) login
     def _action_login(self, client_id, data, conn):
         username = data.get("username")
         password_hash = data.get("password")
+        # print('username', username)
+        # print('password_hash', password_hash)
         if not username or not password_hash:
             resp = {"status": "error", "msg": "Invalid login data."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("login", resp), is_response=1)
             return
 
         # Already logged in by any client?
         if username in self.logged_in_users.values():
             resp = {"status": "error", "msg": "This user is already logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("login", resp), is_response=1)
             return
 
         # This client is already logged in as another user?
@@ -67,22 +71,23 @@ class ActionHandler:
             current_user = self.logged_in_users[client_id]
             if current_user != username:
                 resp = {"status": "error", "msg": "Client is already logged in with another user."}
-                self.protocol_handler.send(conn, Message("response", resp))
+                self.protocol_handler.send(conn, Message("login", resp), is_response=1)
                 return
 
         row = self.db.execute("SELECT password_hash FROM users WHERE username=?", (username,))
         if not row:
             resp = {"status": "error", "msg": "Username not found."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("login", resp), is_response=1)
             return
 
         stored_hash = row[0][0]
         if stored_hash != password_hash:
             resp = {"status": "error", "msg": "Wrong password."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("login", resp), is_response=1)
             return
 
         # Login success
+        #print('at least we got here')
         self.logged_in_users[client_id] = username
         # im not going to use the count action here because i dont want too many dependencies of actions on other actions.
         unread_count = self.db.execute("""
@@ -96,25 +101,25 @@ class ActionHandler:
             "msg": "Login successful.",
             "unread_count": unread_count[0][0]
         }
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("login", resp), is_response=1)
 
     # 3) logout
     def _action_logout(self, client_id, data, conn):
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("logout", resp), is_response=1)
             return
         del self.logged_in_users[client_id]
         resp = {"status": "ok", "msg": "You have been logged out."}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("logout", resp), is_response=1)
 
     # 4) count_unread
     def _action_count_unread(self, client_id, data, conn):
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("count_unread", resp), is_response=1)
             return
 
         result = self.db.execute("""
@@ -130,7 +135,7 @@ class ActionHandler:
             "msg": "Count of away messages.",
             "unread_count": unread_count
         }
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("count_unread", resp), is_response=1)
 
     # 5) send_message
     def _action_send_message(self, client_id, data, conn):
@@ -141,18 +146,18 @@ class ActionHandler:
         current_user = self.logged_in_users.get(client_id)
         if current_user != sender:
             resp = {"status": "error", "msg": "You are not logged in as this sender."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
             return
 
         if not recipient or not content:
             resp = {"status": "error", "msg": "Recipient and content required."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
             return
 
         row = self.db.execute("SELECT id FROM users WHERE username=?", (recipient,))
         if not row:
             resp = {"status": "error", "msg": "Recipient does not exist."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
             return
 
         # If the recipient is logged in, we mark to_deliver=1 immediately
@@ -166,7 +171,7 @@ class ActionHandler:
         """, (sender, recipient, content, delivered_value))
 
         resp = {"status": "ok", "msg": "Message stored."}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
 
 
     # 6) send_messages_to_client
@@ -175,7 +180,7 @@ class ActionHandler:
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("send_messages_to_client", resp), is_response=1)
             return
 
         rows = self.db.execute("""
@@ -195,7 +200,7 @@ class ActionHandler:
             })
 
         resp = {"status": "ok", "msg": results}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("send_messages_to_client", resp), is_response=1)
 
     # 7) fetch_away_messages
     #    - returns a specified number of messages that have to_deliver==0
@@ -204,7 +209,7 @@ class ActionHandler:
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("fetch_away_msgs", resp), is_response=1)
             return
 
         # We'll allow the user to specify a limit, default=10
@@ -237,7 +242,7 @@ class ActionHandler:
             })
 
         resp = {"status": "ok", "msg": fetched_messages}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("fetch_away_msgs", resp), is_response=1)
 
 
     # 8) list_accounts
@@ -248,7 +253,7 @@ class ActionHandler:
 
         if not pattern:
             resp = {"status": "error", "msg": "No pattern provided."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
             return
 
         sql_pattern = f"%{pattern}%"
@@ -262,20 +267,20 @@ class ActionHandler:
 
         matched = [r[0] for r in rows]
         resp = {"status": "ok", "users": matched}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
 
     # 9) delete_messages
     def _action_delete_messages(self, client_id, data, conn):
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("delete_messages", resp), is_response=1)
             return
 
         message_ids = data.get("message_ids_to_delete", [])
         if not isinstance(message_ids, list) or not message_ids:
             resp = {"status": "error", "msg": "No valid message IDs provided."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("delete_messages", resp), is_response=1)
             return
 
         placeholders = ",".join(["?"] * len(message_ids))
@@ -289,7 +294,7 @@ class ActionHandler:
             "msg": f"Deleted {deleted_count} messages.",
             "deleted_count": deleted_count
         }
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("delete_messages", resp), is_response=1)
 
 
     # 10) delete_account
@@ -297,7 +302,7 @@ class ActionHandler:
         current_user = self.logged_in_users.get(client_id)
         if not current_user:
             resp = {"status": "error", "msg": "You are not currently logged in."}
-            self.protocol_handler.send(conn, Message("response", resp))
+            self.protocol_handler.send(conn, Message("delete_account", resp), is_response=1)
             return
 
         # Delete all messages from AND to this user
@@ -308,9 +313,9 @@ class ActionHandler:
         del self.logged_in_users[client_id]
         resp = {
             "status": "ok",
-            "msg": f"Account '{current_user}' has been deleted. All associated messages are removed."
+            "msg": f"Account has been deleted. All associated messages are removed."
         }
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("delete_account", resp), is_response=1)
 
     # 11) reset_db
     def _action_reset_db(self, client_id, data, conn):
@@ -338,4 +343,4 @@ class ActionHandler:
 
         #print("Database reset complete.")
         resp = {"status": "ok", "msg": "Database reset."}
-        self.protocol_handler.send(conn, Message("response", resp))
+        self.protocol_handler.send(conn, Message("delete_account", resp), is_response=True)

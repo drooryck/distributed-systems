@@ -23,24 +23,26 @@ class BaseTest(unittest.TestCase):
         """Initialize socket, protocol, and reset the database before tests."""
         self.sock = socket.create_connection((SERVER_HOST, SERVER_PORT))
         self.protocol = CustomProtocolHandler() if USE_CUSTOM_PROTOCOL else JSONProtocolHandler()
-        self.reset_database()
+        #self.reset_database()
 
     def tearDown(self):
         """Close the socket after each test."""
         self.sock.close()
 
-    def send_message(self, msg_type, data=None):
+    def send_message(self, msg_type, data, is_response):
         """Send a structured message to the server."""
         message = Message(msg_type, data or {})
-        self.protocol.send(self.sock, message)
+        self.protocol.send(self.sock, message, is_response)
 
     def receive_response(self):
         """Receive and parse a response from the server."""
+        #print('gethere1')
         response = self.protocol.receive(self.sock)
+        #print('gethere2')
         return response.data if response else None
 
     def reset_database(self):
         """Reset the database before each test using a temporary connection."""
         with socket.create_connection((SERVER_HOST, SERVER_PORT)) as temp_sock:
-            self.protocol.send(temp_sock, Message("reset_db", {}))
+            self.protocol.send(temp_sock, Message("reset_db", {}), is_response=False)
             temp_sock.recv(1024)  # Clear response buffer

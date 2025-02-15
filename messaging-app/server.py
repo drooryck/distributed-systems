@@ -57,6 +57,7 @@ class Server:
         try:
             while True:
                 message = self.protocol_handler.receive(conn)
+                print('server gets', message)
                 if not message:
                     print(f"[-] Client disconnected: {client_id}")
                     break

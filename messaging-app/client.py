@@ -36,7 +36,6 @@ class ChatServerClient:
         """
         if "socket" not in st.session_state:
             try:
-                # make sure you understand these lines (e.g. see docs)
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((self.server_host, self.server_port))
                 s.settimeout(5)
@@ -316,6 +315,9 @@ class StreamlitChatApp:
 
         # Step 2: manual fetch for offline messages (to_deliver==0)
         if st.button("Fetch Manually"):
+            if st.session_state.manual_fetch_count <= 0:
+                st.warning("Enter a positive number!")
+                return
             away_resp = self.client.send_request(
                 "fetch_away_msgs",
                 {"limit": st.session_state.manual_fetch_count}
@@ -348,18 +350,25 @@ class StreamlitChatApp:
 
         total_pages = (total_msgs + MESSAGES_PER_PAGE - 1) // MESSAGES_PER_PAGE
 
-        # Next/Prev page controls
+        # Ensure page number is in a valid range
+        st.session_state.inbox_page = min(st.session_state.inbox_page, total_pages - 1)
+        st.session_state.inbox_page = max(st.session_state.inbox_page, 0)
+
+        # Display page number info
+        st.write(f"**Page {st.session_state.inbox_page + 1} / {total_pages}**")
+
+        # Next/Prev page controls (conditionally displayed)
         colA, colB = st.columns(2)
         with colA:
-            if st.button("Prev Page"):
-                if st.session_state.inbox_page > 0:
+            if total_pages > 1 and st.session_state.inbox_page > 0:
+                if st.button("Prev Page"):
                     st.session_state.inbox_page -= 1
+                    st.rerun()
         with colB:
-            if st.session_state.inbox_page < total_pages - 1:
+            if total_pages > 1 and st.session_state.inbox_page < total_pages - 1:
                 if st.button("Next Page"):
                     st.session_state.inbox_page += 1
-
-        st.write(f"**Page {st.session_state.inbox_page + 1} / {total_pages}**")
+                    st.rerun()
 
         # Sort messages in LIFO order
         sorted_msgs = sorted(all_msgs, key=lambda x: x.get("id", 0), reverse=True)
@@ -373,7 +382,7 @@ class StreamlitChatApp:
             for msg in page_msgs:
                 cols = st.columns([0.07, 0.93])
                 with cols[0]:
-                    selected = st.checkbox("", key=f"select_{msg['id']}", label_visibility="collapsed")
+                    selected = st.checkbox("selected", key=f"select_{msg['id']}", label_visibility="collapsed")
                 with cols[1]:
                     st.markdown(f"**ID:** {msg['id']} | **From:** {msg.get('sender')}")
                     st.markdown(
@@ -428,40 +437,65 @@ class StreamlitChatApp:
         )
 
         if st.button("Search / Refresh"):
-            st.session_state.account_start = 0
-            self._search_accounts()
+            if not st.session_state.account_pattern.strip():
+                st.warning("Username pattern cannot be empty.")
+            else:
+                st.session_state.account_start = 0
+                self._search_accounts()
 
         if st.session_state.found_accounts:
             st.markdown("**Matching Accounts**:")
             for acc in st.session_state.found_accounts:
                 st.write(f"- {acc}")
 
+            total_accounts = len(st.session_state.found_accounts)
+            total_pages = (total_accounts + st.session_state.account_count - 1) // st.session_state.account_count
+
+            # Ensure the start index is within a valid range
+            st.session_state.account_start = max(st.session_state.account_start, 0)
+
+            # Display current page information
+            current_page = (st.session_state.account_start // st.session_state.account_count) + 1
+            st.write(f"**Page {current_page} / {total_pages}**")
+
+            # Pagination controls (conditionally displayed)
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Prev Accounts") and st.session_state.account_start > 0:
-                    st.session_state.account_start -= st.session_state.account_count
-                    if st.session_state.account_start < 0:
-                        st.session_state.account_start = 0
-                    self._search_accounts()
+                if current_page > 1:
+                    if st.button("Prev Accounts"):
+                        st.session_state.account_start -= st.session_state.account_count
+                        if st.session_state.account_start < 0:
+                            st.session_state.account_start = 0
+                        self._search_accounts()
 
             with col2:
-                if len(st.session_state.found_accounts) == st.session_state.account_count:
+                if total_accounts == st.session_state.account_count:  # Checks if there's possibly more data
                     if st.button("Next Accounts"):
                         st.session_state.account_start += st.session_state.account_count
                         self._search_accounts()
         else:
-            st.info("No accounts found or no search performed yet.")
+            if "account_pattern" not in st.session_state or not st.session_state.account_pattern:
+                st.info("Enter a search pattern and click 'Search / Refresh' to list accounts.")
+            elif not st.session_state.found_accounts:
+                st.warning("No accounts found matching your search criteria.")
+                st.session_state.found_accounts = []
 
     def _search_accounts(self):
         """
         Helper function to call the server's 'list_accounts' action.
         If user enters '*', interpret that as '%'.
+        If 'account_count' <= 0, do not send any request.
         """
         pattern = st.session_state.account_pattern.strip()
         if pattern == "*":
             pattern = "%"
+
         start = st.session_state.account_start
         count = st.session_state.account_count
+
+        if count <= 0:
+            st.warning("Cannot list 0 accounts per page. Please choose a valid page size.")
+            return
 
         data = {
             "pattern": pattern,
@@ -473,7 +507,7 @@ class StreamlitChatApp:
             user_list = resp.get("users", [])
             st.session_state.found_accounts = user_list
         else:
-            st.error("Could not list accounts or no users found.")
+            st.error("Could not list accounts.")
             st.session_state.found_accounts = []
 
     def show_delete_account_page(self):
