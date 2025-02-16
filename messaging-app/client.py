@@ -20,7 +20,7 @@ class ChatServerClient:
     (length-prefixed JSON messages).
     """
 
-    def __init__(self, server_host="10.250.120.214", server_port=5555, protocol="json"):
+    def __init__(self, server_host="127.0.0.1", server_port=5555, protocol="json"):
         self.server_host = server_host
         self.server_port = server_port
         self.protocol = protocol
@@ -84,7 +84,7 @@ class StreamlitChatApp:
       - When offline messages are manually fetched (partial fetching).
     """
 
-    def __init__(self, server_host="10.250.120.214", server_port=5555, protocol="json"):
+    def __init__(self, server_host="127.0.0.1", server_port=5555, protocol="json"):
         self.server_host = server_host
         self.server_port = server_port
         self.client = ChatServerClient(server_host, server_port, protocol)
@@ -426,13 +426,13 @@ class StreamlitChatApp:
         # Local data to this function 
         st.session_state.account_pattern = st.text_input(
             "Username Pattern (enter * for all)",
-            value=st.session_state.account_pattern
+            value=st.session_state.get("account_pattern", "")
         )
         st.session_state.account_count = st.number_input(
             "Accounts per page",
             min_value=1,
             max_value=50,
-            value=st.session_state.account_count,
+            value=st.session_state.get("account_count", 10),
             step=1
         )
 
@@ -440,56 +440,56 @@ class StreamlitChatApp:
             if not st.session_state.account_pattern.strip():
                 st.warning("Username pattern cannot be empty.")
             else:
+                # Reset to the first page and refresh total count.
                 st.session_state.account_start = 0
-                self._search_accounts()
+                self._search_accounts(refresh_total=True)
 
-        if st.session_state.found_accounts:
-            st.markdown("**Matching Accounts**:")
-            for acc in st.session_state.found_accounts:
-                st.write(f"- {acc}")
+        if "found_accounts" in st.session_state:
+            if st.session_state.found_accounts:
+                st.markdown("**Matching Accounts**:")
+                for acc in st.session_state.found_accounts:
+                    st.write(f"- {acc}")
 
-            total_accounts = len(st.session_state.found_accounts)
-            total_pages = (total_accounts + st.session_state.account_count - 1) // st.session_state.account_count
+                # Calculate the current page number.
+                current_page = (st.session_state.account_start // st.session_state.account_count) + 1
+                # Compute total pages using the stored total count.
+                total_found = st.session_state.get("total_found", len(st.session_state.found_accounts))
+                total_pages = (total_found + st.session_state.account_count - 1) // st.session_state.account_count
+                st.write(f"**Page {current_page} / {total_pages}**")
 
-            # Ensure the start index is within a valid range
-            st.session_state.account_start = max(st.session_state.account_start, 0)
-
-            # Display current page information
-            current_page = (st.session_state.account_start // st.session_state.account_count) + 1
-            st.write(f"**Page {current_page} / {total_pages}**")
-
-            # Pagination controls (conditionally displayed)
-            col1, col2 = st.columns(2)
-            with col1:
-                if current_page > 1:
-                    if st.button("Prev Accounts"):
-                        st.session_state.account_start -= st.session_state.account_count
-                        if st.session_state.account_start < 0:
-                            st.session_state.account_start = 0
-                        self._search_accounts()
-
-            with col2:
-                if total_accounts == st.session_state.account_count:  # Checks if there's possibly more data
-                    if st.button("Next Accounts"):
-                        st.session_state.account_start += st.session_state.account_count
-                        self._search_accounts()
-        else:
-            if "account_pattern" not in st.session_state or not st.session_state.account_pattern:
-                st.info("Enter a search pattern and click 'Search / Refresh' to list accounts.")
-            elif not st.session_state.found_accounts:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if current_page > 1:
+                        if st.button("Prev Accounts"):
+                            st.session_state.account_start -= st.session_state.account_count
+                            if st.session_state.account_start < 0:
+                                st.session_state.account_start = 0
+                            # For pagination moves (not refresh), do not update total count.
+                            self._search_accounts(refresh_total=False)
+                with col2:
+                    if current_page < total_pages:
+                        if st.button("Next Accounts"):
+                            st.session_state.account_start += st.session_state.account_count
+                            self._search_accounts(refresh_total=False)
+            else:
                 st.warning("No accounts found matching your search criteria.")
                 st.session_state.found_accounts = []
+        else:
+            st.info("Enter a search pattern and click 'Search / Refresh' to list accounts.")
 
-    def _search_accounts(self):
+
+    def _search_accounts(self, refresh_total=False):
         """
         Helper function to call the server's 'list_accounts' action.
         If user enters '*', interpret that as '%'.
         If 'account_count' <= 0, do not send any request.
+        
+        If refresh_total is True, we perform an additional query with a high count
+        to determine the total number of matching accounts.
         """
         pattern = st.session_state.account_pattern.strip()
         if pattern == "*":
             pattern = "%"
-
         start = st.session_state.account_start
         count = st.session_state.account_count
 
@@ -497,15 +497,26 @@ class StreamlitChatApp:
             st.warning("Cannot list 0 accounts per page. Please choose a valid page size.")
             return
 
-        data = {
-            "pattern": pattern,
-            "start": start,
-            "count": count
-        }
+        # Optionally refresh total count (or if we're on the first page)
+        if refresh_total or start == 0:
+            data_total = {"pattern": pattern, "start": 0, "count": 1000}
+            resp_total = self.client.send_request("list_accounts", data_total)
+            if resp_total and resp_total.get("status") == "ok":
+                # Expect the server to return a list; if tuples, extract the username (index 1)
+                accounts_total = resp_total.get("users", [])
+                st.session_state.total_found = len(
+                    [acc[1] if isinstance(acc, (list, tuple)) else acc for acc in accounts_total]
+                )
+            else:
+                st.session_state.total_found = 0
+
+        # Regular pagination query
+        data = {"pattern": pattern, "start": start, "count": count}
         resp = self.client.send_request("list_accounts", data)
         if resp and resp.get("status") == "ok":
-            user_list = resp.get("users", [])
-            st.session_state.found_accounts = user_list
+            accounts = resp.get("users", [])
+            # Convert each account to username only: if tuple, take index 1; otherwise, use as is.
+            st.session_state.found_accounts = [acc[1] if isinstance(acc, (list, tuple)) else acc for acc in accounts]
         else:
             st.error("Could not list accounts.")
             st.session_state.found_accounts = []
@@ -592,7 +603,7 @@ class StreamlitChatApp:
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JoChat Client")
-    parser.add_argument("--host", type=str, default="10.250.120.214", help="Server IP address (default: 10.250.120.214)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
     parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
                         help="Protocol to use: 'json' or 'custom' (default: custom)")
