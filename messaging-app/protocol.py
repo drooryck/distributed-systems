@@ -82,6 +82,7 @@ class CustomProtocolHandler:
         Encodes a Message (with a known msg_type) into the custom wire format:
           [op_id:1 byte][is_response:1 byte][payload...]
         """
+        print()
         print(message)
         op_id = self.name_to_op.get(message.msg_type, 255)  # fallback: 255 => failure
         print('op_id', op_id)
@@ -100,16 +101,34 @@ class CustomProtocolHandler:
         Returns a Message object or None on error/closed.
         """
         print()
+        print('receiving')
         header = self._recv_exact(conn, 2)
+        print(header)
         if not header:
             return None
         op_id, resp_flag = struct.unpack("!BB", header)
         is_response = (resp_flag == 1)
         msg_type = self.op_to_name.get(op_id, "unknown")
         print(f"Received message: op_id={op_id}, msg_type={msg_type}, is_response={is_response}")
+        # if msg_type == "unknown":
+        #     c_b = self._recv_exact(conn, 20)
+        #     print(c_b)
+        # if not c_b:
+        #     return None
+        # cval = c_b[0]
+        # msg_ids = []
+        # for _ in range(cval):
+        #     id_b = self._recv_exact(conn, 4)
+        #     if not id_b:
+        #         return None
+        #     (mid,) = struct.unpack("!I", id_b)
+        #     msg_ids.append(mid)
+        # data["message_ids_to_delete"] = msg_ids
+
         data = self._decode_payload(conn, msg_type, is_response)
         if data is None:
-            return None
+            print('hier')
+            return None # return an empty message if fails to decode
         return Message(msg_type, data)
 
     ###########################################################################
@@ -278,26 +297,41 @@ class CustomProtocolHandler:
                     packet += encode_string_field(data.get("msg", ""))
 
             elif msg_type == "fetch_away_msgs":
-                # if success=1 => [success:1][msg_count:1][each message] plus a final text field?
+                # Proposed format:
+                # [success:1 byte]
+                # If success=1 => [msg_count:2 bytes], then for each message:
+                #    [id:4] [sender_len:1] [sender_bytes] [content_len:2] [content_bytes]
+                # If success=0 => we encode an error message as [error_len:1][error_utf8]
+                success_byte = 1 if data.get("status") == "ok" else 0
                 packet += struct.pack("!B", success_byte)
+
                 if success_byte == 1:
                     messages = data.get("msg", [])
-                    cnt = len(messages)
-                    if cnt > 255:
-                        cnt = 255
-                    packet += struct.pack("!B", cnt)
-                    for m in messages[:cnt]:
-                        mid = m.get("id", 0)
-                        snd = m.get("sender", "")
-                        content = m.get("content", "")
-                        packet += struct.pack("!I", mid)
-                        s_b = snd.encode("utf-8")
-                        packet += struct.pack("!B", len(s_b)) + s_b
-                        c_b = content.encode("utf-8")
-                        packet += struct.pack("!H", len(c_b)) + c_b
-                    packet += encode_string_field(data.get("msg", ""))
+                    msg_count = len(messages)
+                    # 2-byte big-endian integer for number of messages:
+                    packet += struct.pack("!H", msg_count)
+                    for msg in messages:
+                        msg_id = msg.get("id", 0)
+                        sender = msg.get("sender", "")
+                        content = msg.get("content", "")
+
+                        packet += struct.pack("!I", msg_id)  # 4-byte ID
+
+                        s_bytes = sender.encode("utf-8")
+                        if len(s_bytes) > 255:
+                            s_bytes = s_bytes[:255]          # Trim if needed
+                        packet += struct.pack("!B", len(s_bytes)) + s_bytes
+
+                        c_bytes = content.encode("utf-8")
+                        packet += struct.pack("!H", len(c_bytes)) + c_bytes
                 else:
-                    packet += encode_string_field(data.get("msg", ""))
+                    # Error case => define an error string
+                    err_str = data.get("msg", "Unknown error")
+                    err_bytes = err_str.encode("utf-8")
+                    if len(err_bytes) > 255:
+                        err_bytes = err_bytes[:255]
+                    packet += struct.pack("!B", len(err_bytes)) + err_bytes
+
 
             elif msg_type == "list_accounts":
                 # success=1 => [success:1][acct_count:1] [ each: (acct_id:4)(uname_len:1)(uname) ] + msg
@@ -320,7 +354,12 @@ class CustomProtocolHandler:
 
             elif msg_type == "delete_messages":
                 # [success:1] if success => [deleted_count:1], then a final msg field
+                # 
                 packet += struct.pack("!B", success_byte)
+                print('x')
+                print(packet)
+                print(data)
+                print('x')
                 if success_byte == 1:
                     deleted_cnt = data.get("deleted_count", 0)
                     packet += struct.pack("!B", deleted_cnt)
@@ -399,7 +438,6 @@ class CustomProtocolHandler:
                 if not pw_bytes:
                     return None
                 password = pw_bytes.decode("utf-8")
-
                 data["username"] = username
                 data["password"] = password
 
@@ -637,52 +675,73 @@ class CustomProtocolHandler:
                         return None
                     data["msg"] = msg_str
 
+            # In the _decode_payload method:
+            # fetch away msgs decoding response
             elif msg_type == "fetch_away_msgs":
+                # First read [success:1]
                 success_b = self._recv_exact(conn, 1)
                 if not success_b:
                     return None
                 success = success_b[0]
                 data["status"] = "ok" if success == 1 else "error"
+
                 if success == 1:
-                    c_b = self._recv_exact(conn, 1)
-                    if not c_b:
+                    # Next read [msg_count:2]
+                    count_b = self._recv_exact(conn, 2)
+                    if not count_b:
                         return None
-                    msg_count = c_b[0]
-                    msgs = []
+                    (msg_count,) = struct.unpack("!H", count_b)
+
+                    messages = []
                     for _ in range(msg_count):
-                        id_b = self._recv_exact(conn, 4)
-                        if not id_b:
+                        # [id:4]
+                        msg_id_b = self._recv_exact(conn, 4)
+                        if not msg_id_b:
                             return None
-                        (mid,) = struct.unpack("!I", id_b)
+                        (msg_id,) = struct.unpack("!I", msg_id_b)
+
+                        # [sender_len:1] [sender_bytes]
                         slen_b = self._recv_exact(conn, 1)
                         if not slen_b:
                             return None
                         slen = slen_b[0]
-                        s_bytes = self._recv_exact(conn, slen)
-                        if not s_bytes:
+                        sender_b = self._recv_exact(conn, slen)
+                        if not sender_b:
                             return None
-                        sender_str = s_bytes.decode("utf-8")
+                        sender = sender_b.decode("utf-8")
 
-                        mlen_b = self._recv_exact(conn, 2)
-                        if not mlen_b:
+                        # [content_len:2] [content_bytes]
+                        clen_b = self._recv_exact(conn, 2)
+                        if not clen_b:
                             return None
-                        (mlen,) = struct.unpack("!H", mlen_b)
-                        msg_b = self._recv_exact(conn, mlen)
-                        if not msg_b:
+                        (clen,) = struct.unpack("!H", clen_b)
+                        content_b = self._recv_exact(conn, clen)
+                        if not content_b:
                             return None
-                        content_str = msg_b.decode("utf-8")
+                        content = content_b.decode("utf-8")
 
-                        msgs.append({"id": mid, "sender": sender_str, "content": content_str})
-                    data["msg"] = msgs
-                    # if you want to parse an extra field for success, do it here
-                    # data["tail_msg"] = read_string_field()
-
+                        messages.append({
+                            "id": msg_id,
+                            "sender": sender,
+                            "content": content
+                        })
+                    data["msg"] = messages
                 else:
-                    # parse error message
-                    err_str = read_string_field()
-                    if err_str is None:
+                    # Error case => read an error string as [err_len:1][err_utf8]
+                    err_len_b = self._recv_exact(conn, 1)
+                    if not err_len_b:
                         return None
-                    data["msg"] = err_str
+                    err_len = err_len_b[0]
+                    if err_len > 0:
+                        err_b = self._recv_exact(conn, err_len)
+                        if not err_b:
+                            return None
+                        data["msg"] = err_b.decode("utf-8")
+                    else:
+                        data["msg"] = ""
+
+                # data now has "status" and "msg"
+
 
             elif msg_type == "list_accounts":
                 success_b = self._recv_exact(conn, 1)
@@ -721,6 +780,7 @@ class CustomProtocolHandler:
                     data["msg"] = err_str
 
             elif msg_type == "delete_messages":
+                print('uberhaupt')
                 success_b = self._recv_exact(conn, 1)
                 if not success_b:
                     return None
@@ -735,6 +795,8 @@ class CustomProtocolHandler:
                 if msg_str is None:
                     return None
                 data["msg"] = msg_str
+                print('***')
+                print(data)
 
             elif msg_type == "delete_account":
                 success_b = self._recv_exact(conn, 1)

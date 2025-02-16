@@ -17,12 +17,15 @@ class TestMessageDeliveryStatus(BaseTest):
         self.receive_response()
 
         self.send_message("logout", {}, is_response=0)
-
-        self.send_message("login", {"username": "Frank", "password": "pass123"}, is_response=0)
         self.receive_response()
+        
+        self.send_message("login", {"username": "Frank", "password": "pass123"}, is_response=0)
+        response = self.receive_response()
+        print(response)
+        print('###')
+        print('###')
 
         self.send_message("fetch_away_msgs", {"num_messages": 5}, is_response=0)
-        self.receive_response()
 
         first_fetch = self.receive_response()
         print(first_fetch)

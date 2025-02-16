@@ -11,26 +11,26 @@ class TestLogoutLogin(BaseTest):
         self.reset_database()
 
         # Sign up Alice
-        self.send_message("signup", {"username": "Alice", "password": "secret"})
+        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
         self.receive_response()
 
         # Login Alice
-        self.send_message("login", {"username": "Alice", "password": "secret"})
+        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
         response = self.receive_response()
         self.assertEqual(response["status"], "ok", "❌ Should log in successfully")
 
         # Logout
-        self.send_message("logout", {})
+        self.send_message("logout", {}, is_response=0)
         response = self.receive_response()
         self.assertEqual(response["status"], "ok", "❌ Logout should succeed")
 
         # Attempt action while logged out
-        self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Test message"})
+        self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Test message"}, is_response=0)
         response = self.receive_response()
         self.assertEqual(response["status"], "error", "❌ Should not allow sending while logged out")
 
         # Login again
-        self.send_message("login", {"username": "Alice", "password": "secret"})
+        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
         response = self.receive_response()
         self.assertEqual(response["status"], "ok", "❌ Should log in again after logout")
 

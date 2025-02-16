@@ -260,7 +260,7 @@ class StreamlitChatApp:
             if resp is None:
                 st.error("No response from server. Check that the server is running.")
             elif resp.get("status") != "ok":
-                st.error(resp.get("data", {}).get("msg", "Failed to send message."))
+                st.error(resp.get("msg", "Failed to send message."))
             else:
                 st.success("Message sent!")
                 # Update unread count if needed

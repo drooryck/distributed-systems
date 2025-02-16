@@ -143,14 +143,15 @@ class ActionHandler:
         recipient = data.get("recipient")
         content = data.get("content")
 
-        current_user = self.logged_in_users.get(client_id)
-        if current_user != sender:
-            resp = {"status": "error", "msg": "You are not logged in as this sender."}
+        # on a decoding bug...
+        if not sender or not recipient or not content:
+            resp = {"status": "error", "msg": "Sender, recipient, and content required."}
             self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
             return
 
-        if not recipient or not content:
-            resp = {"status": "error", "msg": "Recipient and content required."}
+        current_user = self.logged_in_users.get(client_id)
+        if current_user != sender:
+            resp = {"status": "error", "msg": "You are not logged in as this sender."}
             self.protocol_handler.send(conn, Message("send_message", resp), is_response=1)
             return
 
@@ -214,6 +215,10 @@ class ActionHandler:
 
         # We'll allow the user to specify a limit, default=10
         limit = data.get("limit", 10)
+        if not limit:
+            resp = {"status": "error", "msg": "No limit specified."}
+            self.protocol_handler.send(conn, Message("fetch_away_msgs", resp), is_response=1)
+            return
 
         # Find messages that have not been delivered yet
         rows = self.db.execute("""
@@ -251,7 +256,7 @@ class ActionHandler:
         start = data.get("start", 0)
         count = data.get("count", 10)
 
-        if not pattern:
+        if not pattern or not start or not count:
             resp = {"status": "error", "msg": "No pattern provided."}
             self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
             return
