@@ -1,21 +1,25 @@
-# Wire Protocol: Chat System
+# Wire Protocol: Chat
 
 ## General Rules
 
-- **Integers.** Integers are encoded in **big-endian** format.
-- **Booleans.** Represented as 1-byte integers (1 for true, 0 for false).
-- **Strings.** Strings are encoded in UTF-8 and prefixed with a 1-byte (or more) integer specifying their length.
-- **Message Structure.** Every message begins with a **1-byte Operation ID**, followed by an **is_response byte** (1 = response, 0 = request).
-- **Parsing Strategy.** Messages are parsed field-by-field based on their format; there is no global length field.
-- **Versioning.** When modifying message formats, assign new Operation IDs to ensure backward compatibility.
+- **Integers.** Integers have a fixed byte-length and are encoded in **big-endian** order.
+- **Booleans.** Booleans are represented as 1-byte integers (1 for true, 0 for false).
+- **Strings.** Strings are encoded in UTF-8. They are not null‐terminated; instead, each string is preceded by a 1-byte integer (or specified length) that indicates its length in bytes.
+- Every message begins with a **1-byte Operation ID**. This ID indicates the type of the message.  
+- The same Operation ID is used both for requests (client → server) and for responses (server → client), but the formats differ as described below.
+- The second byte in each message is an **is_response flag** (`0` for requests, `1` for responses). This flag helps distinguish between incoming and outgoing messages when processing protocol traffic.
+- There is **no global message length field**; each message is parsed field‐by‐field based on its specification.
+- **Versioning:** If an operation’s format is updated, assign a new Operation ID.
 
 ---
 
 ## Operation 1: Create Account
 
+_Note: When creating an account, the user’s socket is automatically associated with the new account (no subsequent login required)._
+
 ### Request
 - **Operation ID (1 byte):** `1`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 - **Username Length (1 byte)**
 - **Username (String)**
 - **Password Hash Length (1 byte)**
@@ -23,12 +27,10 @@
 
 ### Response
 - **Operation ID (1 byte):** `1`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
-  - `1` if account creation succeeded.
-  - `0` if failed (e.g., username already exists).
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+  - `1` if the account was created successfully.
+  - `0` if there was an error (e.g., username already exists).
 
 ---
 
@@ -36,7 +38,7 @@
 
 ### Request
 - **Operation ID (1 byte):** `2`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 - **Username Length (1 byte)**
 - **Username (String)**
 - **Password Hash Length (1 byte)**
@@ -44,14 +46,13 @@
 
 ### Response
 - **Operation ID (1 byte):** `2`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
   - `1` if login succeeded.
-  - `0` if failed.
+  - `0` if login failed.
 - **Unread Message Count (2 bytes)**
-  - If login failed, this is `0` or `0xFFFF` for an error indicator.
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+  - A 2-byte unsigned integer.  
+  - If login failed, the count can be `0` (or a special value, e.g., `0xFFFFFFFF`).
 
 ---
 
@@ -59,32 +60,29 @@
 
 ### Request
 - **Operation ID (1 byte):** `3`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 
 ### Response
 - **Operation ID (1 byte):** `3`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
   - `1` if logout succeeded.
-  - `0` if client was not logged in.
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+  - `0` if the client was not logged in.
 
 ---
 
-## Operation 4: Count Unread Messages
+## Operation 4: Count Unread
 
 ### Request
 - **Operation ID (1 byte):** `4`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 
 ### Response
 - **Operation ID (1 byte):** `4`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
 - **Unread Message Count (2 bytes)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+  - A 2-byte integer indicating the number of unread messages.
 
 ---
 
@@ -92,7 +90,7 @@
 
 ### Request
 - **Operation ID (1 byte):** `5`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 - **Sender Length (1 byte)**
 - **Sender (String)**
 - **Recipient Length (1 byte)**
@@ -102,112 +100,135 @@
 
 ### Response
 - **Operation ID (1 byte):** `5`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+  - `1` if the message was stored successfully.
+  - `0` if there was an error (e.g., the recipient does not exist).
 
 ---
 
-## Operation 6: Retrieve Messages
+## Operation 6: Send Messages to Client
+
+*(This operation delivers messages that are marked for immediate delivery.)*
 
 ### Request
 - **Operation ID (1 byte):** `6`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 
 ### Response
 - **Operation ID (1 byte):** `6`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
 - **Message Count (1 byte)**
-- **For each message:**
+- For each message delivered:
   - **Message ID (4 bytes)**
   - **Sender Length (1 byte)**
   - **Sender (String)**
   - **Message Length (2 bytes)**
   - **Message (String)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
 
 ---
 
-## Operation 7: List Accounts
+## Operation 7: Fetch Away Messages
+
+*(This operation fetches offline messages that have not been immediately delivered.)*
 
 ### Request
 - **Operation ID (1 byte):** `7`
-- **Request (1) or Response (0) Byte:** `0`
-- **Max Accounts (1 byte)**
-- **Start Index (4 bytes)**
-- **Pattern Length (1 byte)**
-- **Pattern (String)**
+- **Request (0) or Response (1) Byte:** `0`
+- **Limit (1 byte)**
+  - Maximum number of offline messages to fetch.
 
 ### Response
 - **Operation ID (1 byte):** `7`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
-- **Account Count (1 byte)**
-- **For each account:**
+- **Message Count (1 byte)**
+- For each message fetched:
+  - **Message ID (4 bytes)**
+  - **Sender Length (1 byte)**
+  - **Sender (String)**
+  - **Message Length (2 bytes)**
+  - **Message (String)**
+
+---
+
+## Operation 8: List Accounts
+
+### Request
+- **Operation ID (1 byte):** `8`
+- **Request (0) or Response (1) Byte:** `0`
+- **Count (1 byte)**
+  - Maximum number of accounts to list.
+- **Start (4 bytes)**
+  - The offset index from which to start listing accounts.
+- **Pattern Length (1 byte)**
+- **Pattern (String)**
+  - A search/filter pattern for account usernames (e.g., `%Alice%`).
+
+### Response
+- **Operation ID (1 byte):** `8`
+- **Request (0) or Response (1) Byte:** `1`
+- **Success (1 byte Boolean)**
+- **Number of Accounts (1 byte)**
+- For each account:
   - **Account ID (4 bytes)**
   - **Username Length (1 byte)**
   - **Username (String)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
 
 ---
 
-## Operation 8: Delete Messages
+## Operation 9: Delete Messages
 
 ### Request
-- **Operation ID (1 byte):** `8`
-- **Request (1) or Response (0) Byte:** `0`
+- **Operation ID (1 byte):** `9`
+- **Request (0) or Response (1) Byte:** `0`
 - **Count (1 byte)**
-- **For each message:**
+  - The number of message IDs to delete (maximum 255).
+- For each message to delete:
   - **Message ID (4 bytes)**
 
 ### Response
-- **Operation ID (1 byte):** `8`
-- **Request (1) or Response (0) Byte:** `1`
+- **Operation ID (1 byte):** `9`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
-- **Deleted Count (1 byte)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
+- **Deleted Message Count (1 byte)**
+  - The number of messages successfully deleted.
 
 ---
 
-## Operation 9: Delete Account
-
-### Request
-- **Operation ID (1 byte):** `9`
-- **Request (1) or Response (0) Byte:** `0`
-
-### Response
-- **Operation ID (1 byte):** `9`
-- **Request (1) or Response (0) Byte:** `1`
-- **Success (1 byte Boolean)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
-
----
-
-## Operation 10: Reset Database
+## Operation 10: Delete Account
 
 ### Request
 - **Operation ID (1 byte):** `10`
-- **Request (1) or Response (0) Byte:** `0`
+- **Request (0) or Response (1) Byte:** `0`
 
 ### Response
 - **Operation ID (1 byte):** `10`
-- **Request (1) or Response (0) Byte:** `1`
+- **Request (0) or Response (1) Byte:** `1`
 - **Success (1 byte Boolean)**
-- **Message Length (1 byte)**
-- **Message (String, optional explanatory message)**
 
 ---
 
-## Failure Response (Optional)
+## Operation 11: Reset Database
+
+### Request
+- **Operation ID (1 byte):** `11`
+- **Request (0) or Response (1) Byte:** `0`
+
+### Response
+- **Operation ID (1 byte):** `11`
+- **Request (0) or Response (1) Byte:** `1`
+- **Success (1 byte Boolean)**
+  - `1` if the database was reset successfully.
+  - `0` if there was an error.
+
+---
+
+## Failure Response (Optional - Operation ID 255)
+
+*(This response is used when an unexpected error occurs or an unknown request is received.)*
 
 ### Response
 - **Operation ID (1 byte):** `255`
-- **Request (1) or Response (0) Byte:** `1`
-- **Error Message Length (2 bytes)**
-- **Error Message (String)**
+- **Request (0) or Response (1) Byte:** `1`
