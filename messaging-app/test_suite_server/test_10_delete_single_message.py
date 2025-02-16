@@ -45,7 +45,7 @@ class TestDeleteSingleMessage(BaseTest):
         delivered_before_delete = self.receive_response()
         self.assertEqual(len(delivered_before_delete["msg"]), 1, "❌ Should have 1 delivered message")
 
-        # Bob deletes this message
+
         print(msg_id)
         self.send_message("delete_messages", {"message_ids_to_delete": [msg_id]}, is_response=0)
         delete_response = self.receive_response()
@@ -54,10 +54,10 @@ class TestDeleteSingleMessage(BaseTest):
         self.assertEqual(delete_response["status"], "ok", "❌ Deleting single message should succeed")
         self.assertEqual(delete_response["deleted_count"], 1, "❌ Should delete exactly 1 message")
 
-        # # Verify it's no longer in delivered
-        # self.send_message("send_messages_to_client", {}, is_response=0)
-        # delivered_after_delete = self.receive_response()
-        # self.assertEqual(len(delivered_after_delete["msg"]), 0, "❌ Message should be gone after deletion")
+        # Verify it's no longer in delivered
+        self.send_message("send_messages_to_client", {}, is_response=0)
+        delivered_after_delete = self.receive_response()
+        self.assertEqual(len(delivered_after_delete["msg"]), 0, "❌ Message should be gone after deletion")
 
 if __name__ == "__main__":
     import unittest

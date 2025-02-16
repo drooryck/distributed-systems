@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from protocol import JSONProtocolHandler, CustomProtocolHandler, Message
 
-SERVER_HOST = "10.250.120.214"
+SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5555
 USE_CUSTOM_PROTOCOL = True  # Set True for binary protocol
 

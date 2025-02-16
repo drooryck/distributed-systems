@@ -17,7 +17,6 @@ class ActionHandler:
             "logout": self._action_logout,
             "send_message": self._action_send_message,
             "count_unread": self._action_count_unread,
-            "send_message": self._action_send_message,
             "send_messages_to_client": self._action_send_messages_to_client,
             "fetch_away_msgs": self._action_fetch_away_messages,
             "list_accounts": self._action_list_accounts,
@@ -212,13 +211,13 @@ class ActionHandler:
             resp = {"status": "error", "msg": "You are not currently logged in."}
             self.protocol_handler.send(conn, Message("fetch_away_msgs", resp), is_response=1)
             return
+        
+        limit = data.get("limit")
 
-        # We'll allow the user to specify a limit, default=10
-        limit = data.get("limit", 10)
         if not limit:
             resp = {"status": "error", "msg": "No limit specified."}
             self.protocol_handler.send(conn, Message("fetch_away_msgs", resp), is_response=1)
-            return
+
 
         # Find messages that have not been delivered yet
         rows = self.db.execute("""
@@ -348,4 +347,4 @@ class ActionHandler:
 
         #print("Database reset complete.")
         resp = {"status": "ok", "msg": "Database reset."}
-        self.protocol_handler.send(conn, Message("delete_account", resp), is_response=True)
+        self.protocol_handler.send(conn, Message("reset_db", resp), is_response=1)

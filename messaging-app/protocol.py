@@ -270,31 +270,57 @@ class CustomProtocolHandler:
                 packet += encode_string_field(data.get("msg", ""))
 
             elif msg_type == "send_messages_to_client":
-                # If success=1 => [success:1][msg_count:1][each message...] + optional trailing msg?
-                # If success=0 => [success:1=0][msg]
+                """
+                If data.get("status") == "ok":
+                [success=1]
+                [msg_count:1]
+                For each message:
+                    [id:4][sender_len:1][sender][content_len:2][content]
+                Else:
+                [success=0]
+                [err_len:1][err_utf8]
+                """
+                success_byte = 1 if data.get("status") == "ok" else 0
                 packet += struct.pack("!B", success_byte)
+
                 if success_byte == 1:
                     messages = data.get("msg", [])
-                    cnt = len(messages)
-                    if cnt > 255:
-                        cnt = 255
-                    packet += struct.pack("!B", cnt)
-                    for m in messages[:cnt]:
-                        mid = m.get("id", 0)
-                        snd = m.get("sender", "")
-                        content = m.get("content", "")
-                        packet += struct.pack("!I", mid)
-                        s_b = snd.encode("utf-8")
-                        if len(s_b) > 255:
-                            s_b = s_b[:255]
-                        packet += struct.pack("!B", len(s_b)) + s_b
-                        c_b = content.encode("utf-8")
-                        packet += struct.pack("!H", len(c_b)) + c_b
-                    # If you want an extra "msg" field after success data:
-                    packet += encode_string_field(data.get("extra_msg", ""))
+                    msg_count = len(messages)
+                    if msg_count > 255:
+                        msg_count = 255
+                    # 1 byte for message count
+                    packet += struct.pack("!B", msg_count)
+
+                    for m in messages[:msg_count]:
+                        msg_id = m.get("id", 0)
+                        sender_str = m.get("sender", "")
+                        content_str = m.get("content", "")
+
+                        # ID is 4 bytes
+                        packet += struct.pack("!I", msg_id)
+
+                        # Sender
+                        sender_bytes = sender_str.encode("utf-8")
+                        if len(sender_bytes) > 255:
+                            sender_bytes = sender_bytes[:255]
+                        packet += struct.pack("!B", len(sender_bytes))
+                        packet += sender_bytes
+
+                        # Content
+                        content_bytes = content_str.encode("utf-8")
+                        content_len = len(content_bytes)
+                        packet += struct.pack("!H", content_len)
+                        packet += content_bytes
+
                 else:
-                    # if success=0 => just an error message
-                    packet += encode_string_field(data.get("msg", ""))
+                    # If error => [err_len:1][err_utf8]
+                    err_msg = data.get("msg", "Unknown error")
+                    err_bytes = err_msg.encode("utf-8")
+                    if len(err_bytes) > 255:
+                        err_bytes = err_bytes[:255]
+                    packet += struct.pack("!B", len(err_bytes))
+                    packet += err_bytes
+
 
             elif msg_type == "fetch_away_msgs":
                 # Proposed format:
@@ -631,49 +657,79 @@ class CustomProtocolHandler:
                 data["msg"] = msg_str
 
             elif msg_type == "send_messages_to_client":
+                """
+                [success:1]
+                If success=1:
+                [msg_count:1]
+                For each message => [id:4][sender_len:1][sender_utf8][content_len:2][content_utf8]
+                Else:
+                [err_len:1][err_utf8]
+                """
+
                 success_b = self._recv_exact(conn, 1)
                 if not success_b:
                     return None
                 success = success_b[0]
                 data["status"] = "ok" if success == 1 else "error"
+
                 if success == 1:
-                    c_b = self._recv_exact(conn, 1)
-                    if not c_b:
+                    # read msg_count
+                    msg_count_b = self._recv_exact(conn, 1)
+                    if not msg_count_b:
                         return None
-                    msg_count = c_b[0]
+                    msg_count = msg_count_b[0]
+
                     msgs = []
                     for _ in range(msg_count):
+                        # [id:4]
                         id_b = self._recv_exact(conn, 4)
                         if not id_b:
                             return None
                         (mid,) = struct.unpack("!I", id_b)
+
+                        # [sender_len:1]
                         slen_b = self._recv_exact(conn, 1)
                         if not slen_b:
                             return None
                         slen = slen_b[0]
+                        # [sender_utf8]
                         s_bytes = self._recv_exact(conn, slen)
                         if not s_bytes:
                             return None
                         sender_str = s_bytes.decode("utf-8")
 
-                        mlen_b = self._recv_exact(conn, 2)
-                        if not mlen_b:
+                        # [content_len:2]
+                        clen_b = self._recv_exact(conn, 2)
+                        if not clen_b:
                             return None
-                        (mlen,) = struct.unpack("!H", mlen_b)
-                        content_bytes = self._recv_exact(conn, mlen)
+                        (clen,) = struct.unpack("!H", clen_b)
+                        # [content_utf8]
+                        content_bytes = self._recv_exact(conn, clen)
                         if not content_bytes:
                             return None
                         content_str = content_bytes.decode("utf-8")
 
-                        msgs.append({"id": mid, "sender": sender_str, "content": content_str})
+                        msgs.append({
+                            "id": mid,
+                            "sender": sender_str,
+                            "content": content_str
+                        })
                     data["msg"] = msgs
-                    # optional trailing message if you do so:
-                    # data["extra_msg"] = read_string_field() or something
+
                 else:
-                    msg_str = read_string_field()
-                    if msg_str is None:
+                    # error => read [err_len:1][err_utf8]
+                    err_len_b = self._recv_exact(conn, 1)
+                    if not err_len_b:
                         return None
-                    data["msg"] = msg_str
+                    err_len = err_len_b[0]
+                    if err_len > 0:
+                        err_bytes = self._recv_exact(conn, err_len)
+                        if not err_bytes:
+                            return None
+                        data["msg"] = err_bytes.decode("utf-8")
+                    else:
+                        data["msg"] = ""
+
 
             # In the _decode_payload method:
             # fetch away msgs decoding response
