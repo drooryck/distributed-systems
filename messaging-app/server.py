@@ -19,7 +19,7 @@ from actions import ActionHandler
 #############################
 
 class Server:
-    def __init__(self, host="10.250.120.214", port=5555, protocol="json", db_name="chat.db"):
+    def __init__(self, host, port, protocol, db_name="chat.db"):
         self.host = host
         self.port = port
         self.protocol = protocol.lower()

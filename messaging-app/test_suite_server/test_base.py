@@ -36,9 +36,7 @@ class BaseTest(unittest.TestCase):
 
     def receive_response(self):
         """Receive and parse a response from the server."""
-        #print('gethere1')
         response = self.protocol.receive(self.sock)
-        #print('gethere2')
         return response.data if response else None
 
     def reset_database(self):

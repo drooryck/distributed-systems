@@ -16,11 +16,12 @@ from protocol import Message, JSONProtocolHandler, CustomProtocolHandler
 # for all functions: make sure you understand these lines (e.g. see docs)
 class ChatServerClient:
     """
-    Encapsulates server connection behavior and JSON communication protocol
-    (length-prefixed JSON messages).
+    Encapsulates server connection behavior using the new custom binary protocol.
+    All client→server messages are requests (is_response=False);
+    the server replies with is_response=True.
     """
 
-    def __init__(self, server_host="127.0.0.1", server_port=5555, protocol="json"):
+    def __init__(self, server_host, server_port, protocol):
         self.server_host = server_host
         self.server_port = server_port
         self.protocol = protocol
@@ -29,11 +30,7 @@ class ChatServerClient:
         else:
             self.protocol_handler = CustomProtocolHandler()
 
-
     def _get_socket(self):
-        """
-        Get (or create) a persistent socket connection stored in Streamlit's session state.
-        """
         if "socket" not in st.session_state:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -45,30 +42,30 @@ class ChatServerClient:
                 return None
         return st.session_state["socket"]
 
-    def send_request(self, msg_type, data):
+    def send_request(self, msg_type, data=None):
         """
-        Send a request to the server using the selected protocol.
+        Send a request (is_response=False) to the server
+        and read exactly one response (is_response=True).
         """
         sock = self._get_socket()
         if not sock:
             return None
         try:
-            message = Message(msg_type, data)
-            self.protocol_handler.send(sock, message)
+            # 1) Build a request message
+            message = Message(msg_type, data or {})
+            # 2) Send with is_response=False
+            self.protocol_handler.send(sock, message, is_response=False)
 
-            # Receive response
+            # 3) Receive single response (server uses is_response=True)
             response = self.protocol_handler.receive(sock)
-            #print(f"[DEBUG] Raw response received from server: {response}, {self.protocol_handler}")
             return response.data if response else None
+
         except Exception as e:
             st.error(f"Error communicating with server: {e}")
-        return None
+            return None
 
     @staticmethod
     def hash_password(password):
-        """
-        Return a SHA-256 hash of the password for secure transmission.
-        """
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
@@ -605,7 +602,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JoChat Client")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
-    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
+    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="custom",
                         help="Protocol to use: 'json' or 'custom' (default: custom)")
 
     args = parser.parse_args()

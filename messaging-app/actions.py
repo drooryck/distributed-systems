@@ -26,10 +26,8 @@ class ActionHandler:
         }
         action = action_map.get(message.msg_type)
         if action:
-            #print('action found', action_map.get(message.msg_type))
             action(client_id, message.data, conn)
         else:
-            #print('couldnt find that action mate')
             self.protocol_handler.send(conn, Message("signup", {"status": "error", "msg": "Unknown action"}), is_response=1)
 
     # 1) signup
@@ -52,8 +50,6 @@ class ActionHandler:
     def _action_login(self, client_id, data, conn):
         username = data.get("username")
         password_hash = data.get("password")
-        # print('username', username)
-        # print('password_hash', password_hash)
         if not username or not password_hash:
             resp = {"status": "error", "msg": "Invalid login data."}
             self.protocol_handler.send(conn, Message("login", resp), is_response=1)
@@ -86,7 +82,6 @@ class ActionHandler:
             return
 
         # Login success
-        #print('at least we got here')
         self.logged_in_users[client_id] = username
         # im not going to use the count action here because i dont want too many dependencies of actions on other actions.
         unread_count = self.db.execute("""
@@ -357,6 +352,5 @@ class ActionHandler:
             );
         """)
 
-        #print("Database reset complete.")
         resp = {"status": "ok", "msg": "Database reset."}
         self.protocol_handler.send(conn, Message("reset_db", resp), is_response=1)
