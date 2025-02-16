@@ -1,13 +1,11 @@
 import socket
 import threading
-import sqlite3
 from queue import Queue
-import json
-import struct
 import argparse
-import struct
 
-from protocol import Message, JSONProtocolHandler, CustomProtocolHandler
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from protocol.protocol import Message, JSONProtocolHandler, CustomProtocolHandler
 
 
 from database import Database
@@ -78,10 +76,7 @@ class Server:
             job = queue.get()
             self.actions.process_client_action(client_id, job, conn)
 
-    #############################
-    # UTILITIES
-    #############################
-
+    ### SIMPLE DATABASE UTILITY 
     def _store_message(self, sender, recipient, content):
         c = self.conn.cursor()
         c.execute("""
@@ -93,9 +88,9 @@ class Server:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the messaging server.")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="IP address to bind the server (default: 10.250.120.214)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="IP address to bind the server (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5555, help="Port to listen on (default: 5555)")
-    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json", help="Protocol to use (default: json)")
+    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="custom", help="Protocol to use (default: json)")
     # add reset database keyword with default no as an argument
     args = parser.parse_args()
 

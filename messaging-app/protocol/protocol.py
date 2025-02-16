@@ -1,7 +1,7 @@
 import struct
 import json
 
-DEBUG_FLAG = True
+DEBUG_FLAG = False
 
 ###############################################################################
 # Message Class
@@ -88,9 +88,7 @@ class CustomProtocolHandler:
         if DEBUG_FLAG:
             print('op_id', op_id)
             print(f"Sending message: msg_type={message.msg_type}, op_id={op_id}, is_response={is_response}")
-        # Build payload based on whether it's a request or a response
         payload = self._encode_payload(message.msg_type, is_response, message.data)
-        # The final packet = [op_id:1] + [is_response:1] + payload
         header = struct.pack("!B", op_id) + struct.pack("!B", 1 if is_response else 0)
         packet = header + payload
         if DEBUG_FLAG:

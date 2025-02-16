@@ -1,9 +1,12 @@
-from protocol import Message
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from protocol.protocol import Message
 
 
 #############################
 # ACTION METHODS (ORDERED)
 #############################
+
 class ActionHandler:
     def __init__(self, db, protocol_handler, logged_in_users):
         self.db = db

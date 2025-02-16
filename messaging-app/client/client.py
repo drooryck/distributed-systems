@@ -10,10 +10,11 @@ import argparse
 # pip install streamlit-autorefresh
 from streamlit_autorefresh import st_autorefresh
 
-from protocol import Message, JSONProtocolHandler, CustomProtocolHandler
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from protocol.protocol import Message, JSONProtocolHandler, CustomProtocolHandler
 
 
-# for all functions: make sure you understand these lines (e.g. see docs)
 class ChatServerClient:
     """
     Encapsulates server connection behavior using the new custom binary protocol.
@@ -51,12 +52,8 @@ class ChatServerClient:
         if not sock:
             return None
         try:
-            # 1) Build a request message
             message = Message(msg_type, data or {})
-            # 2) Send with is_response=False
-            self.protocol_handler.send(sock, message, is_response=False)
-
-            # 3) Receive single response (server uses is_response=True)
+            self.protocol_handler.send(sock, message, is_response=False) # all client→server messages are requests
             response = self.protocol_handler.receive(sock)
             return response.data if response else None
 
@@ -559,8 +556,6 @@ class StreamlitChatApp:
                 st.rerun()
             else:
                 st.error(response.get("msg", "Logout failed."))
-                
-                
 
     def run_app(self):
         """
@@ -602,8 +597,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JoChat Client")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
-    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="custom",
-                        help="Protocol to use: 'json' or 'custom' (default: custom)")
+    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
+                        help="Protocol to use: 'json' or 'custom' (default: json)")
 
     args = parser.parse_args()
 

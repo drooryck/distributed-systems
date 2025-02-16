@@ -1,15 +1,13 @@
 import socket
-import struct
 import unittest
-import json
-import sys
-import os
+
 import time
 
+import sys, os
 # Add the parent directory to sys.path to import 'protocol'
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from protocol import JSONProtocolHandler, CustomProtocolHandler, Message
+from protocol.protocol import JSONProtocolHandler, CustomProtocolHandler, Message
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5555

@@ -5,7 +5,7 @@ warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
 
 # Ensure the parent directory is in the Python path to avoid import errors
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from test_base_client import BaseTestClient  # Base class that sets up a client and mocks socket
 from unittest.mock import patch, MagicMock

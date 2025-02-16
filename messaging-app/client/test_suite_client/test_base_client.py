@@ -4,7 +4,7 @@ import warnings
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from client import ChatServerClient
 
@@ -24,7 +24,7 @@ class BaseTestClient(unittest.TestCase):
     def setUp(self):
         """Initialize a mock session state and client before each test."""
         st.session_state.clear()
-        self.client = ChatServerClient(SERVER_HOST, SERVER_PORT)
+        self.client = ChatServerClient(SERVER_HOST, SERVER_PORT, protocol="json")
 
     def mock_send_response(self, mock_socket, response_data):
         """Helper function to simulate sending and receiving a response."""
