@@ -771,7 +771,7 @@ class CustomProtocolHandler:
                         users.append((acct_id, uname))
                     data["users"] = users
                     # optionally parse trailing msg
-                    # data["msg"] = read_string_field()
+                    data["msg"] = read_string_field()
                 else:
                     # parse error message
                     err_str = read_string_field()

@@ -252,25 +252,37 @@ class ActionHandler:
 
     # 8) list_accounts
     def _action_list_accounts(self, client_id, data, conn):
+        # Check for pattern key and nonempty pattern.
         pattern = data.get("pattern")
-        start = data.get("start", 0)
-        count = data.get("count", 10)
-
-        if not pattern or not start or not count:
+        if pattern is None or pattern == "":
             resp = {"status": "error", "msg": "No pattern provided."}
             self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
             return
 
+        # Build the SQL search pattern.
         sql_pattern = f"%{pattern}%"
-        rows = self.db.execute("""
-            SELECT username 
+        try:
+            start = int(data.get("start", 0))
+            count = int(data.get("count", 10))
+        except (ValueError, TypeError):
+            resp = {"status": "error", "msg": "Invalid pagination parameters."}
+            self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
+            return
+
+        # Inline the LIMIT and OFFSET values into the query string.
+        query = f"""
+            SELECT id, username 
             FROM users 
             WHERE username LIKE ?
             ORDER BY username 
-            LIMIT ? OFFSET ?
-        """, (sql_pattern, count, start))
+            LIMIT {count} OFFSET {start}
+        """
+        rows = self.db.execute(query, (sql_pattern,)) or []
 
-        matched = [r[0] for r in rows]
+        # Build a list of (id, username) tuples.
+        matched = [(row[0], row[1]) for row in rows]
+
+        # Send response with status ok.
         resp = {"status": "ok", "users": matched}
         self.protocol_handler.send(conn, Message("list_accounts", resp), is_response=1)
 
