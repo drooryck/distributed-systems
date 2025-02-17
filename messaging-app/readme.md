@@ -3,19 +3,24 @@ JoChat is a distributed messaging system that supports user authentication, mess
 
 ## Quick Setup & Deployment  
 To set up and run JoChat, follow these steps in a **fresh virtual environment** (for the love of that which is holy):
-You can find your local network's ip address by doing ifconfig.
+You can find your local network's ip address by doing ifconfig. Get
 ```
 pip install -r requirements.txt
-make run-server  # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)``
-make run-client  # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)``
+make run-server  SERVER_ARGS=" # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)`` "
+make run-client  CLIENT_ARGS = " # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)`` " 
 ```
 
 An example:
 ```
 make run-client CLIENT_ARGS="--protocol custom"
-make run-server SERVER_ARGS="--port 5001 --debug"
+make run-server SERVER_ARGS="--port 5001"
 or simply
 make run-all SERVER_ARGS="--port 5001" CLIENT_ARGS="--protocol custom"
+```
+
+If you are confused, run
+```
+make run-server SERVER_ARGS="--help"
 ```
 
 This will spin up a **Streamlit web application**, allowing you to:  
@@ -95,14 +100,14 @@ The `StreamlitChatApp` class is the main application page for the Streamlit user
 
 Overall, the UI is designed to provide a real-time messaging experience with features like an unread message counter, dynamically updated inbox, and user authentication management. All pages are accessible at any time via the sidebar, and each session operates under a single logged-in user to ensure session integrity.
 
-### For the **custom binary protocol**, refer to [`spec.md`](spec.md) ' in the protocol folder.
+### For the **custom binary protocol**, refer to [`protocol/spec.md`](spec.md) ' in the protocol folder.
 
 
 ### Testing & Quality Assurance 
 JoChat includes a comprehensive unit test suite, and has undergone integration testing. 
 
 #### Running Tests  
-
+To run any tests, first spin up a server with the ip and port specified in the test_base files.
 To run server-side tests, `cd` into the test_suite_server folder and execute the following command:  
 ```bash
 python -m unittest

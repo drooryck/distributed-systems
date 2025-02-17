@@ -8,6 +8,11 @@ CLIENT_ARGS ?=
 install:
 	pip install -r server/requirements.txt
 	pip install -r client/requirements.txt
+	pip install --upgrade pip
+	pip install --upgrade -r server/requirements.txt
+	pip install --upgrade -r client/requirements.txt
+	pip install streamlit
+	pip install --upgrade streamlit
 
 # Start the server with optional arguments
 run-server:

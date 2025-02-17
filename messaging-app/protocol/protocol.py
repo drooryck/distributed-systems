@@ -1,7 +1,7 @@
 import struct
 import json
 
-DEBUG_FLAG = True
+DEBUG_FLAG = False
 
 ###############################################################################
 # Message Class
