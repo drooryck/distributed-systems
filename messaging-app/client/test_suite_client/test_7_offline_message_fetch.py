@@ -22,15 +22,19 @@ class TestOfflineMessageFetch(BaseTestClient):
 
         mock_sock = MagicMock()
         # Simulate offline message response: one message with id 202.
-        self.mock_send_response(mock_sock, {"data": {"status": "ok", "msg": [
-            {"id": 202, "sender": "Alice", "content": "Offline message", "to_deliver": 0}
-        ]}})
+        self.mock_send_response(
+            mock_sock,
+            {"status": "ok", "msg": [
+                {"id": 202, "sender": "Alice", "content": "Offline message", "to_deliver": 0}
+            ]},
+            "fetch_away_msgs"
+        )
         mock_socket.return_value = mock_sock
 
         response = self.client.send_request("fetch_away_msgs", {"limit": 5})
-        self.assertEqual(response["data"]["status"], "ok")
+        self.assertEqual(response["status"], "ok")
 
-        for m in response["data"]["msg"]:
+        for m in response["msg"]:
             st.session_state["all_messages"].append(m)
 
         self.assertEqual(len(st.session_state["all_messages"]), 1)

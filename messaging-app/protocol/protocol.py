@@ -1,7 +1,7 @@
 import struct
 import json
 
-DEBUG_FLAG = False
+DEBUG_FLAG = True
 
 ###############################################################################
 # Message Class
@@ -93,6 +93,7 @@ class CustomProtocolHandler:
         packet = header + payload
         if DEBUG_FLAG:
             print(f"Packet to send: {packet}")
+            print(len(packet))
         conn.sendall(packet)
 
     def receive(self, conn):
@@ -100,7 +101,7 @@ class CustomProtocolHandler:
         Reads 2 bytes for [op_id, is_response], then decodes payload accordingly.
         Returns a Message object or None on error/closed.
         """
-
+        
         header = self._recv_exact(conn, 2)
         if not header:
             return None
@@ -315,12 +316,14 @@ class CustomProtocolHandler:
 
 
             elif msg_type == "fetch_away_msgs":
-                # Proposed format:
-                # [success:1 byte]
-                # If success=1 => [msg_count:2 bytes], then for each message:
-                #    [id:4] [sender_len:1] [sender_bytes] [content_len:2] [content_bytes]
-                # If success=0 => we encode an error message as [error_len:1][error_utf8]
+                """
+                Proposed format:
+                [success:1 byte]
+                If success=1 => [msg_count:2 bytes], then for each message:
+                   [id:4] [sender_len:1] [sender_bytes] [content_len:2] [content_bytes]
+                If success=0 => we encode an error message as [error_len:1][error_utf8]
                 success_byte = 1 if data.get("status") == "ok" else 0
+                """
                 packet += struct.pack("!B", success_byte)
 
                 if success_byte == 1:
@@ -352,21 +355,21 @@ class CustomProtocolHandler:
 
 
             elif msg_type == "list_accounts":
-                # If status="ok":
+                """
+                If status="ok":
 
-                # [success:1] → 1
-                # [acct_count:1]
-                # For each account:
-                # [acct_id:4]
-                # [uname_len:1]
-                # [uname (UTF-8, up to 255 bytes)]
-                # If status="error":
+                [success:1] → 1
+                [acct_count:1]
+                For each account:
+                [acct_id:4]
+                [uname_len:1]
+                [uname (UTF-8, up to 255 bytes)]
+                If status="error":
 
-                # [success:1] → 0
-                # [err_len:1]
-                # [err_utf8 (up to 255 bytes)]
-
-                # 1) success byte
+                [success:1] → 0
+                [err_len:1]
+                [err_utf8 (up to 255 bytes)]
+                """
                 success_byte = 1 if data.get("status") == "ok" else 0
                 packet += struct.pack("!B", success_byte)
 
@@ -392,7 +395,6 @@ class CustomProtocolHandler:
 
             elif msg_type == "delete_messages":
                 # [success:1] if success => [deleted_count:1], then a final msg field
-                # 
                 packet += struct.pack("!B", success_byte)
                 if success_byte == 1:
                     deleted_cnt = data.get("deleted_count", 0)

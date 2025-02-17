@@ -18,14 +18,20 @@ class TestListAccounts(BaseTestClient):
         """
         st.session_state.clear()
         mock_sock = MagicMock()
-        # Simulate a server response: when pattern "a" is sent, return "alice" and "charlie"
-        self.mock_send_response(mock_sock, {"data": {"status": "ok", "users": ["alice", "charlie"]}})
+        # Simulate a server response: when pattern "a" is sent, return accounts for alice and charlie.
+        self.mock_send_response(
+            mock_sock,
+            {"status": "ok", "users": [(1, "alice"), (2, "charlie")]},
+            "list_accounts"
+        )
         mock_socket.return_value = mock_sock
 
         response = self.client.send_request("list_accounts", {"pattern": "a", "start": 0, "count": 10})
-        self.assertEqual(response["data"]["status"], "ok")
-        self.assertIn("alice", response["data"]["users"])
-        self.assertIn("charlie", response["data"]["users"])
+        self.assertEqual(response["status"], "ok")
+        # Extract usernames from the list of tuples.
+        usernames = [uname for (_, uname) in response["users"]]
+        self.assertIn("alice", usernames)
+        self.assertIn("charlie", usernames)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

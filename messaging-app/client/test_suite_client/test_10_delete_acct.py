@@ -26,11 +26,18 @@ class TestDeleteAccount(BaseTestClient):
 
         mock_sock = MagicMock()
         # Simulate a successful delete_account response.
-        self.mock_send_response(mock_sock, {"data": {"status": "ok", "msg": "Account 'Alice' has been deleted. All associated messages are removed."}})
+        self.mock_send_response(
+            mock_sock,
+            {"status": "ok", "msg": "Account 'Alice' has been deleted. All associated messages are removed."},
+            "delete_account"
+        )
         mock_socket.return_value = mock_sock
 
         response = self.client.send_request("delete_account", {})
-        self.assertEqual(response["data"]["status"], "ok")
+        print("###")
+        print(response)
+        print("###")
+        self.assertEqual(response["status"], "ok")
 
         # In the UI, after a successful account deletion, session state is reset.
         st.session_state["logged_in"] = False

@@ -9,9 +9,8 @@
 - The same Operation ID is used both for requests (client → server) and for responses (server → client), but the formats differ as described below.
 - The second byte in each message is an **is_response flag** (`0` for requests, `1` for responses). This flag helps distinguish between incoming and outgoing messages when processing protocol traffic.
 - There is **no global message length field**; each message is parsed field‐by‐field based on its specification.
-- **Versioning:** If an operation’s format is updated, assign a new Operation ID.
+- There are important assumptions on the length of certain things with this format. A username can only be 256 chars long, the unread message count cannot exceed 65536,  messages cannot exceed 65536 bytes, and the number of messages total in the system cannot exceed 2^32 bytes. This should not be an issue.
 
----
 
 ## Operation 1: Create Account
 
