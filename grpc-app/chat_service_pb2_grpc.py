@@ -61,15 +61,15 @@ class ChatServiceStub(object):
                 request_serializer=chat__service__pb2.SendMessageRequest.SerializeToString,
                 response_deserializer=chat__service__pb2.GenericResponse.FromString,
                 _registered_method=True)
-        self.SendMessagesToClient = channel.unary_unary(
-                '/chat.ChatService/SendMessagesToClient',
-                request_serializer=chat__service__pb2.SendMessagesToClientRequest.SerializeToString,
-                response_deserializer=chat__service__pb2.MessagesListResponse.FromString,
+        self.ListMessages = channel.unary_unary(
+                '/chat.ChatService/ListMessages',
+                request_serializer=chat__service__pb2.ListMessagesRequest.SerializeToString,
+                response_deserializer=chat__service__pb2.ListMessagesResponse.FromString,
                 _registered_method=True)
         self.FetchAwayMsgs = channel.unary_unary(
                 '/chat.ChatService/FetchAwayMsgs',
                 request_serializer=chat__service__pb2.FetchAwayMsgsRequest.SerializeToString,
-                response_deserializer=chat__service__pb2.MessagesListResponse.FromString,
+                response_deserializer=chat__service__pb2.GenericResponse.FromString,
                 _registered_method=True)
         self.ListAccounts = channel.unary_unary(
                 '/chat.ChatService/ListAccounts',
@@ -133,7 +133,7 @@ class ChatServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SendMessagesToClient(self, request, context):
+    def ListMessages(self, request, context):
         """6) send_messages_to_client
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -203,15 +203,15 @@ def add_ChatServiceServicer_to_server(servicer, server):
                     request_deserializer=chat__service__pb2.SendMessageRequest.FromString,
                     response_serializer=chat__service__pb2.GenericResponse.SerializeToString,
             ),
-            'SendMessagesToClient': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendMessagesToClient,
-                    request_deserializer=chat__service__pb2.SendMessagesToClientRequest.FromString,
-                    response_serializer=chat__service__pb2.MessagesListResponse.SerializeToString,
+            'ListMessages': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListMessages,
+                    request_deserializer=chat__service__pb2.ListMessagesRequest.FromString,
+                    response_serializer=chat__service__pb2.ListMessagesResponse.SerializeToString,
             ),
             'FetchAwayMsgs': grpc.unary_unary_rpc_method_handler(
                     servicer.FetchAwayMsgs,
                     request_deserializer=chat__service__pb2.FetchAwayMsgsRequest.FromString,
-                    response_serializer=chat__service__pb2.MessagesListResponse.SerializeToString,
+                    response_serializer=chat__service__pb2.GenericResponse.SerializeToString,
             ),
             'ListAccounts': grpc.unary_unary_rpc_method_handler(
                     servicer.ListAccounts,
@@ -382,7 +382,7 @@ class ChatService(object):
             _registered_method=True)
 
     @staticmethod
-    def SendMessagesToClient(request,
+    def ListMessages(request,
             target,
             options=(),
             channel_credentials=None,
@@ -395,9 +395,9 @@ class ChatService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/chat.ChatService/SendMessagesToClient',
-            chat__service__pb2.SendMessagesToClientRequest.SerializeToString,
-            chat__service__pb2.MessagesListResponse.FromString,
+            '/chat.ChatService/ListMessages',
+            chat__service__pb2.ListMessagesRequest.SerializeToString,
+            chat__service__pb2.ListMessagesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -424,7 +424,7 @@ class ChatService(object):
             target,
             '/chat.ChatService/FetchAwayMsgs',
             chat__service__pb2.FetchAwayMsgsRequest.SerializeToString,
-            chat__service__pb2.MessagesListResponse.FromString,
+            chat__service__pb2.GenericResponse.FromString,
             options,
             channel_credentials,
             insecure,

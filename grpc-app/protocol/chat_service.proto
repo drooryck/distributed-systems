@@ -39,10 +39,11 @@ message ChatMessage {
   string content  = 3;
 }
 
-message MessagesListResponse {
-  string status = 1;
-  string msg    = 2;
+message ListMessagesResponse {
+  string status  = 1;
+  string msg     = 2;
   repeated ChatMessage messages = 3;
+  int32 total_count = 4;  // total # messages (for paging)
 }
 
 // For "list_accounts", we can store repeated user records:
@@ -99,9 +100,11 @@ message SendMessageRequest {
 
 }
 
-// for "send_messages_to_client"
-message SendMessagesToClientRequest {
+// for "list_messages"
+message ListMessagesRequest {
   string auth_token = 1;
+  int32 start       = 2;  // 0-based offset
+  int32 count       = 3;  // how many messages to return
 }
 
 // For "fetch_away_msgs"
@@ -143,10 +146,10 @@ service ChatService {
   rpc SendMessage(SendMessageRequest) returns (GenericResponse);
 
   // 6) send_messages_to_client
-  rpc SendMessagesToClient(SendMessagesToClientRequest) returns (MessagesListResponse);
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
 
   // 7) fetch_away_msgs
-  rpc FetchAwayMsgs(FetchAwayMsgsRequest) returns (MessagesListResponse);
+  rpc FetchAwayMsgs(FetchAwayMsgsRequest) returns (GenericResponse);
 
   // 8) list_accounts
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);

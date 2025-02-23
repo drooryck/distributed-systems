@@ -200,135 +200,146 @@ class StreamlitChatApp:
 
  
 
-    ###########################################################################
-    # Inbox
-    ###########################################################################
+        ###########################################################################
+        # Inbox
+        ###########################################################################
     def show_inbox_page(self):
         st.header("Inbox")
         st_autorefresh(interval=5000, key="inbox_autorefresh")
 
-
-        # this is an input field, it just defines the button on the page
+        # (A) Manual Fetch for Offline Messages (if you want to keep that)
         st.write("**Manually fetch offline messages**")
         manual_fetch_count = st.number_input(
             "How many offline messages to fetch at once?",
             min_value=1,
             max_value=100,
-            value=5,  # default
+            value=5,
             step=1
         )
-
         if st.button("Fetch Manually"):
             if manual_fetch_count <= 0:
                 st.warning("Enter a positive number.")
                 return
-            
-            away_resp = stub.FetchAwayMsgs(chat_service_pb2.FetchAwayMsgsRequest(limit=manual_fetch_count, auth_token=st.session_state.auth_token))
 
+            # This is your existing "FetchAwayMsgs"
+            away_resp = stub.FetchAwayMsgs(
+                chat_service_pb2.FetchAwayMsgsRequest(
+                    limit=manual_fetch_count,
+                    auth_token=st.session_state.auth_token
+                )
+            )
             if not away_resp:
                 st.error("No response from server.")
                 return
-            
-            if away_resp and away_resp.status == "ok":
-                st.rerun() # or somethign like
+            if away_resp.status == "ok":
+                # We'll refresh the inbox
+                st.rerun()
             else:
                 st.error("Manual fetch failed or returned an error.")
 
-
-        # 3) Pagination uses st.session_state.inbox_page
+        # (B) Use st.session_state.inbox_page for paging
+        if "inbox_page" not in st.session_state:
+            st.session_state.inbox_page = 0
 
         MESSAGES_PER_PAGE = 10
+        current_page = st.session_state.inbox_page
+        start_offset = current_page * MESSAGES_PER_PAGE
 
-        all_msgs = stub.SendMessagesToClient(chat_service_pb2.SendMessagesToClientRequest(auth_token=st.session_state.auth_token))
-        if not all_msgs:
+        # (C) Request messages from the server with the desired offset/limit
+        list_resp = stub.ListMessages(
+            chat_service_pb2.ListMessagesRequest(
+                auth_token=st.session_state.auth_token,
+                start=start_offset,
+                count=MESSAGES_PER_PAGE
+            )
+        )
+        if not list_resp:
             st.error("No response from server.")
             return
 
-        if all_msgs.status == "ok":
-            msgs = all_msgs.messages if all_msgs.messages else []
-        else:
-            st.error("Could not fetch messages.")
+        if list_resp.status != "ok":
+            st.error(f"Could not fetch messages: {list_resp.msg}")
+            return
 
-        total_msgs = len(msgs)
+        msgs = list_resp.messages  # repeated ChatMessage
+        total_msgs = list_resp.total_count
+
         if total_msgs == 0:
             st.info("No messages in your inbox yet.")
             return
 
-        # at this stage we have 'msgs' which is a list of messages, and we have 'total_msgs'
-
-        # the total number of pages at this moment that the user can scroll thru
+        # (D) Compute how many pages we have, ensure current_page is valid
         total_pages = (total_msgs + MESSAGES_PER_PAGE - 1) // MESSAGES_PER_PAGE
+        # Make sure we don't go out of range
+        if current_page >= total_pages:
+            st.session_state.inbox_page = max(0, total_pages - 1)
+            st.rerun()
 
-        # set the inbox page to the last page if it is was greater than how many pages there will now be.
-        st.session_state.inbox_page = min(st.session_state.inbox_page, total_pages - 1)
-        st.session_state.inbox_page = max(st.session_state.inbox_page, 0)
+        st.write(f"**Page {current_page + 1} / {total_pages}**")
 
-        # writing the page number on the app.
-        st.write(f"**Page {st.session_state.inbox_page + 1} / {total_pages}**")
+        # (E) Render pagination buttons
 
-
-        # bloody mess, no idea why this needs to be like this. maybe streamlit problem.
         colA, colB = st.columns(2)
         with colA:
-            if total_pages > 1 and st.session_state.inbox_page > 0:
+            if current_page > 0:
                 if st.button("Prev Page"):
                     st.session_state.inbox_page -= 1
                     st.rerun()
         with colB:
-            if total_pages > 1 and st.session_state.inbox_page < total_pages - 1:
+            if current_page < total_pages - 1:
                 if st.button("Next Page"):
                     st.session_state.inbox_page += 1
                     st.rerun()
 
-        # sorting by id implicitly sorts by time, because messages are assigned rising ids in the server.
-        sorted_msgs = sorted(msgs, key=lambda x: x.id, reverse=True)
-        start_idx = st.session_state.inbox_page * MESSAGES_PER_PAGE
-        end_idx = start_idx + MESSAGES_PER_PAGE
-        page_msgs = sorted_msgs[start_idx:end_idx]
-
-        if not page_msgs:
+        ### F: SHOW THE MESSAGES
+        if not msgs:
+            # Could happen if the offset >= total_msgs
             st.info("No messages on this page.")
-        else: # there are messages to show:
-            st.markdown("### Messages in your inbox (latest first):")
-            
-            selected_msg_ids = []
+            return
 
-            for cur_msg in page_msgs:
-                cols = st.columns([0.07, 0.93])
+        st.markdown("### Messages in your inbox (newest first):")
 
-                # load the checkbox for deleting messages
-                with cols[0]:
-                    selected = st.checkbox("selected", key=f"select_{cur_msg.id}", label_visibility="collapsed")
-                    if selected: # keep track of the checkbox-selected messages
-                        selected_msg_ids.append(cur_msg.id)
+        selected_msg_ids = []
 
-                # load the message itself, its id, its sender, and its content.
-                with cols[1]:
-                    st.markdown(f"**ID:** {cur_msg.id} | **From:** {cur_msg.sender}")
-                    st.markdown(
-                        f"<div style='padding: 0.5rem 0;'>{cur_msg.content}</div>",
-                        unsafe_allow_html=True
+        for cur_msg in msgs:
+            cols = st.columns([0.07, 0.93])
+            with cols[0]:
+                selected = st.checkbox(
+                    "selected",
+                    key=f"select_{cur_msg.id}",
+                    label_visibility="collapsed"
+                )
+                if selected:
+                    selected_msg_ids.append(cur_msg.id)
+            with cols[1]:
+                st.markdown(f"**ID:** {cur_msg.id} | **From:** {cur_msg.sender}")
+                st.markdown(
+                    f"<div style='padding: 0.5rem 0;'>{cur_msg.content}</div>",
+                    unsafe_allow_html=True
+                )
+            st.markdown("---")
+
+        # (G) Delete Selected
+        if st.button("Delete Selected"):
+            if not selected_msg_ids:
+                st.warning("No messages selected for deletion.")
+            else:
+                del_resp = stub.DeleteMessages(
+                    chat_service_pb2.DeleteMessagesRequest(
+                        auth_token=st.session_state.auth_token,
+                        message_ids_to_delete=selected_msg_ids
                     )
-                st.markdown("---") # a little divider
-
-            
-            # logic for deleting all the messages that have been selected (are in a list)
-            if st.button("Delete Selected"):
-                if not selected_msg_ids:
-                    st.warning("No messages selected for deletion.")
+                )
+                if not del_resp:
+                    st.error("No response from server.")
+                    return
+                if del_resp.status == "ok":
+                    st.success(f"Deleted {len(selected_msg_ids)} message(s).")
+                    # reload this page
+                    st.rerun()
                 else:
-                    #del_resp = self.client.send_request("delete_messages", {"message_ids_to_delete": selected_msg_ids})
-                    del_resp = stub.DeleteMessages(chat_service_pb2.DeleteMessagesRequest(auth_token=st.session_state.auth_token, message_ids_to_delete=selected_msg_ids))
+                    st.error("Deletion of selected messages failed.")
 
-                    if not del_resp:
-                        st.error("No response from server.")
-                        return
-                    
-                    if del_resp.status == "ok":
-                        st.success(f"Deleted {len(selected_msg_ids)} message(s).")
-                        st.rerun()
-                    else:
-                        st.error("Deletion of selected messages failed.")
 
     ###########################################################################
     # List Accounts

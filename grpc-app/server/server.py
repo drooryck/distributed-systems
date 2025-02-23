@@ -113,25 +113,37 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
 
         return chat_service_pb2.GenericResponse(status="ok", msg="Message sent")
     
-    def SendMessagesToClient(self, request, context):
+    def ListMessages(self, request, context):
         cur_user = self.logged_in_users.get(request.auth_token, -1)
 
         if request.auth_token not in self.logged_in_users:
             return chat_service_pb2.GenericResponse(status="error", msg="Not logged in")
     
+        # 2) Count how many messages the user has total
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM messages WHERE recipient=?",
+            (cur_user,)
+        )
+        total_count = row[0][0] if row else 0
 
-        rows = self.db.execute("""SELECT id, sender, content, to_deliver FROM messages WHERE recipient=? AND to_deliver=1 ORDER BY id ASC """, (cur_user,), commit=True)
+        # 3) Get just the slice of messages for this page
+        rows = self.db.execute("""SELECT id, sender, content, to_deliver FROM messages WHERE recipient=? ORDER BY id DESC LIMIT ? OFFSET ?""",(cur_user, request.count, request.start))
 
-        # new format! see the .proto
+        # 4) Build the repeated ChatMessage
         messages = []
-        for (msg_id, sender, content, _) in rows:
-            message = chat_service_pb2.ChatMessage(id=msg_id, sender=sender, content=content)
-            messages.append(message)
+        for msg_id, sender, content, to_deliver in rows:
+            cm = chat_service_pb2.ChatMessage(
+                id=msg_id,
+                sender=sender,
+                content=content
+            )
+            messages.append(cm)
 
-        return chat_service_pb2.MessagesListResponse(
+        return chat_service_pb2.ListMessagesResponse(
             status="ok",
             msg="Messages retrieved successfully",
-            messages=messages
+            messages=messages,
+            total_count=total_count
         )
 
     def FetchAwayMsgs(self, request, context):
@@ -147,7 +159,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             self.db.execute("""UPDATE messages SET to_deliver=1 WHERE id IN ({})""".format(','.join('?' * len(rows))), tuple(row[0] for row in rows), commit=True)
 
         # Convert to ChatMessage format and return
-        return chat_service_pb2.MessagesListResponse(
+        return chat_service_pb2.ListMessagesResponse(
             status="ok",
             msg="Messages retrieved successfully",
             messages=[chat_service_pb2.ChatMessage(id=msg_id, sender=sender, content=content) for msg_id, sender, content in rows]
