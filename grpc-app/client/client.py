@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 import streamlit as st
-import socket
-import json
+from streamlit_autorefresh import st_autorefresh
 import hashlib
-import struct  # For packing/unpacking the 4-byte length prefix
-import time
 import argparse
 
-from streamlit_autorefresh import st_autorefresh
 import sys, os
-
-# Adjust import to your protocol's actual location
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from protocol.protocol import Message, JSONProtocolHandler, CustomProtocolHandler
+import grpc
+import chat_service_pb2
+import chat_service_pb2_grpc
+
 
 ###############################################################################
 # ChatServerClient
@@ -24,42 +21,9 @@ class ChatServerClient:
     the server replies with is_response=True.
     """
 
-    def __init__(self, server_host, server_port, protocol):
+    def __init__(self, server_host, server_port):
         self.server_host = server_host
         self.server_port = server_port
-        if protocol == "json":
-            self.protocol_handler = JSONProtocolHandler()
-        else:
-            self.protocol_handler = CustomProtocolHandler()
-
-    def _get_socket(self):
-        if "socket" not in st.session_state:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect((self.server_host, self.server_port))
-                s.settimeout(5)
-                st.session_state["socket"] = s
-            except Exception as e:
-                st.error(f"Failed to connect to server: {e}")
-                return None
-        return st.session_state["socket"]
-
-    def send_request(self, msg_type, data=None):
-        """
-        Send a request (is_response=False) to the server
-        and read exactly one response (is_response=True).
-        """
-        sock = self._get_socket()
-        if not sock:
-            return None
-        try:
-            message = Message(msg_type, data or {})
-            self.protocol_handler.send(sock, message, is_response=False)
-            response = self.protocol_handler.receive(sock)
-            return response.data if response else None
-        except Exception as e:
-            st.error(f"Error communicating with server: {e}")
-            return None
 
     @staticmethod
     def hash_password(password):
@@ -86,10 +50,10 @@ class StreamlitChatApp:
       - logged_in, username, inbox_page (so the user remains on the same page in the inbox)
     """
 
-    def __init__(self, server_host="127.0.0.1", server_port=5555, protocol="json"):
+    def __init__(self, server_host, server_port):
         self.server_host = server_host
         self.server_port = server_port
-        self.client = ChatServerClient(server_host, server_port, protocol)
+        self.client = ChatServerClient(server_host, server_port)
         self._init_session_state()
 
     def _init_session_state(self):
@@ -98,11 +62,16 @@ class StreamlitChatApp:
             st.session_state.logged_in = False
         if "username" not in st.session_state:
             st.session_state.username = ""
+            
         # we need the current page we are on in our inbox, because we cannot
         # expect the server to remember what page we are on and only deliver
         # us the messages from those pages
         if "inbox_page" not in st.session_state:
             st.session_state.inbox_page = 0
+        if "auth_token" not in st.session_state:
+            st.session_state.auth_token = ""
+        if "account_page" not in st.session_state:
+            st.session_state.account_page = 0
 
     def apply_custom_css(self):
         st.markdown(
@@ -159,38 +128,39 @@ class StreamlitChatApp:
 
             if action == "Login":
                 # Attempt login
-                resp = self.client.send_request("login", {"username": username, "password": hashed_pw})
+                resp = stub.Login(chat_service_pb2.LoginRequest(username=username, password=hashed_pw))
                 if not resp:
                     st.error("No response from server.")
                     return
-                if resp.get("status") == "ok":
+                if resp.status == "ok":
                     st.success("Logged in successfully!")
                     st.session_state.logged_in = True
                     st.session_state.username = username
+                    st.session_state.auth_token = resp.auth_token
                     st.rerun()
                 else:
-                    st.error("Wrong password.")
+                    st.error(resp.msg) # may deprecate server sending this error msg later.
 
             else:  # "Create Account"
-                signup_resp = self.client.send_request("signup", {"username": username, "password": hashed_pw})
-                print(signup_resp)
+                signup_resp = stub.Signup(chat_service_pb2.SignupRequest(username=username, password=hashed_pw))
                 if not signup_resp:
                     st.error("No response from server.")
                     return
-                if signup_resp.get("status") != "ok":
-                    st.error(signup_resp.get("msg", "Account creation failed."))
+                if signup_resp.status != "ok":
+                    st.error(signup_resp.msg if signup_resp.msg else "Account creation failed.")
                     return
 
                 # 3) Auto-login
-                login_resp = self.client.send_request("login", {"username": username, "password": hashed_pw})
+                login_resp = stub.Login(chat_service_pb2.LoginRequest(username=username, password=hashed_pw))
                 # Should not happen, but just in case
-                if not login_resp or login_resp.get("status") != "ok":
+                if not login_resp or login_resp.status != "ok":
                     st.error("Account created but auto-login failed.")
                     return
 
                 st.success("Account created and logged in successfully!")
                 st.session_state.logged_in = True
                 st.session_state.username = username
+                st.session_state.auth_token = login_resp.auth_token
                 st.rerun()
 
     ###########################################################################
@@ -198,9 +168,9 @@ class StreamlitChatApp:
     ###########################################################################
     def show_home_page(self):
         st.header("Welcome!")
-        resp = self.client.send_request("count_unread", {})
-        if resp and resp.get("status") == "ok":
-            unread_count = resp.get("unread_count", 0)
+        resp = stub.CountUnread(chat_service_pb2.CountUnreadRequest(auth_token=st.session_state.auth_token))
+        if resp and resp.status == "ok":
+            unread_count = resp.unread_count if resp.unread_count else 0
         st.write(f"You have {unread_count} unread message(s).")
         st.info("Use the sidebar to navigate to Send Message, Inbox, List Accounts, Delete Account, or Logout.")
 
@@ -222,11 +192,12 @@ class StreamlitChatApp:
                 "recipient": recipient,
                 "content": message_text
             }
-            resp = self.client.send_request("send_message", data)
+            # resp = self.client.send_request("send_message", data)
+            resp = stub.SendMessage(chat_service_pb2.SendMessageRequest(sender=data["sender"], recipient=data["recipient"], auth_token=st.session_state.auth_token))
             if not resp:
                 st.error("No response from server.")
                 return
-            if resp.get("status") == "ok":
+            if resp.status == "ok":
                 st.success("Message sent!")
             else:
                 st.error("Message send failure.")
@@ -256,31 +227,29 @@ class StreamlitChatApp:
                 st.warning("Enter a positive number.")
                 return
             
-            away_resp = self.client.send_request("fetch_away_msgs", {"limit": manual_fetch_count})
+            away_resp = stub.FetchAwayMsgs(chat_service_pb2.FetchAwayMsgsRequest(limit=manual_fetch_count, auth_token=st.session_state.auth_token))
 
             if not away_resp:
                 st.error("No response from server.")
                 return
             
-            if away_resp and away_resp.get("status") == "ok":
+            if away_resp and away_resp.status == "ok":
                 st.rerun() # or somethign like
             else:
                 st.error("Manual fetch failed or returned an error.")
 
 
         # 3) Pagination uses st.session_state.inbox_page
-        # NO IT BETTER NOT.
 
         MESSAGES_PER_PAGE = 10
 
-        all_msgs = self.client.send_request("send_messages_to_client", {})
-
+        all_msgs = stub.SendMessagesToClient(chat_service_pb2.SendMessagesToClientRequest(auth_token=st.session_state.auth_token))
         if not all_msgs:
             st.error("No response from server.")
             return
 
-        if all_msgs.get("status") == "ok":
-            msgs = all_msgs.get("msg", [])
+        if all_msgs.status == "ok":
+            msgs = all_msgs.messages if all_msgs.messages else []
         else:
             st.error("Could not fetch messages.")
 
@@ -316,7 +285,7 @@ class StreamlitChatApp:
                     st.rerun()
 
         # sorting by id implicitly sorts by time, because messages are assigned rising ids in the server.
-        sorted_msgs = sorted(msgs, key=lambda x: x.get("id", 0), reverse=True)
+        sorted_msgs = sorted(msgs, key=lambda x: x.id, reverse=True)
         start_idx = st.session_state.inbox_page * MESSAGES_PER_PAGE
         end_idx = start_idx + MESSAGES_PER_PAGE
         page_msgs = sorted_msgs[start_idx:end_idx]
@@ -333,15 +302,15 @@ class StreamlitChatApp:
 
                 # load the checkbox for deleting messages
                 with cols[0]:
-                    selected = st.checkbox("selected", key=f"select_{cur_msg['id']}", label_visibility="collapsed")
+                    selected = st.checkbox("selected", key=f"select_{cur_msg.id}", label_visibility="collapsed")
                     if selected: # keep track of the checkbox-selected messages
-                        selected_msg_ids.append(cur_msg["id"])
+                        selected_msg_ids.append(cur_msg.id)
 
                 # load the message itself, its id, its sender, and its content.
                 with cols[1]:
-                    st.markdown(f"**ID:** {cur_msg['id']} | **From:** {cur_msg.get('sender')}")
+                    st.markdown(f"**ID:** {cur_msg.id} | **From:** {cur_msg.sender}")
                     st.markdown(
-                        f"<div style='padding: 0.5rem 0;'>{cur_msg.get('content')}</div>",
+                        f"<div style='padding: 0.5rem 0;'>{cur_msg.content}</div>",
                         unsafe_allow_html=True
                     )
                 st.markdown("---") # a little divider
@@ -353,12 +322,13 @@ class StreamlitChatApp:
                     st.warning("No messages selected for deletion.")
                 else:
                     del_resp = self.client.send_request("delete_messages", {"message_ids_to_delete": selected_msg_ids})
+                    del_resp = stub.DeleteMessages(chat_service_pb2.DeleteMessagesRequest(auth_token=st.session_state.auth_token, message_ids_to_delete=selected_msg_ids))
 
                     if not del_resp:
                         st.error("No response from server.")
                         return
                     
-                    if del_resp.get("status") == "ok":
+                    if del_resp.status == "ok":
                         st.success(f"Deleted {len(selected_msg_ids)} message(s).")
                         st.rerun()
                     else:
@@ -370,40 +340,92 @@ class StreamlitChatApp:
     def show_list_accounts_page(self):
         st.header("Search / List Accounts")
 
-        # local input for search pattern, etc.
-        account_pattern = st.text_input("Username Pattern (enter * for all)", "")
-        account_count = st.number_input("Accounts per page", min_value=1, max_value=50, value=10, step=1)
+        # Initialize pagination state if not present
+        if "account_page" not in st.session_state:
+            st.session_state.account_page = 0
 
+        # 1) Gather user inputs
+        pattern_input = st.text_input("Username Pattern (enter '*' for all)", "")
+        accounts_per_page = st.number_input(
+            "Accounts per page",
+            min_value=1,
+            max_value=50,
+            value=10,
+            step=1
+        )
+
+        # 2) If user clicks "Search / Refresh," reset to page 0
         if st.button("Search / Refresh"):
-            if not account_pattern.strip():
-                st.warning("Username pattern cannot be empty.")
-            else:
-                self._perform_account_search(account_pattern, account_count)
+            st.session_state.account_page = 0
 
-    def _perform_account_search(self, pattern, count):
-        """Search accounts (local pagination approach: we just do a single query)."""
-        if pattern.strip() == "*":
+        # 3) Convert '*' → '%' for sql, and strip
+        pattern = pattern_input.strip()
+        if pattern == "*":
             pattern = "%"
-
-        data = {"pattern": pattern, "start": 0, "count": count}
-        resp = self.client.send_request("list_accounts", data)
-        if not resp:
-            st.error("No response from server while listing accounts.")
+        if not pattern:
+            st.info("Enter a pattern (or '*') and click 'Search / Refresh'.")
             return
 
-        if resp.get("status") == "ok":
-            results = resp.get("users", [])
-            if not results:
-                st.warning("No accounts found matching your search criteria.")
-                return
-            st.markdown("**Matching Accounts**:")
-            for acc in results:
-                if isinstance(acc, (list, tuple)) and len(acc) == 2:
-                    st.write(f"- ID {acc[0]} => {acc[1]}")
-                else:
-                    st.write(f"- {acc}")
-        else:
-            st.error("Could not list accounts.")
+        # 4) First, fetch total number of matching accounts
+        #    by requesting a large count (or you could define a dedicated Count API).
+        total_resp = stub.ListAccounts(
+            chat_service_pb2.ListAccountsRequest(
+                auth_token=st.session_state.auth_token,
+                pattern=pattern,
+                start=0,
+                count=1000  # effectively "no limit"
+            )
+        )
+        if not total_resp or total_resp.status != "ok":
+            st.error(f"Could not list accounts. Server status: {getattr(total_resp, 'status', 'no response')}")
+            return
+
+        total_accounts = len(total_resp.users)
+        if total_accounts == 0:
+            st.warning("No accounts found matching your search criteria.")
+            return
+
+        # 5) Now fetch only the subset for the current page
+        start_offset = st.session_state.account_page * accounts_per_page
+        page_resp = stub.ListAccounts(
+            chat_service_pb2.ListAccountsRequest(
+                auth_token=st.session_state.auth_token,
+                pattern=pattern,
+                start=start_offset,
+                count=accounts_per_page
+            )
+        )
+        if not page_resp or page_resp.status != "ok":
+            st.error(f"Could not list accounts (page). Server status: {getattr(page_resp, 'status', 'no response')}")
+            return
+
+        # 6) Display the accounts for this page
+        accounts_on_page = page_resp.users
+        st.markdown("**Matching Accounts (this page):**")
+        for acc in accounts_on_page:
+            st.write(f"- {acc.username}")
+
+        # 7) Pagination controls
+        total_pages = (total_accounts + accounts_per_page - 1) // accounts_per_page
+        current_page = st.session_state.account_page + 1
+
+        st.write(f"**Page {current_page} / {total_pages}**")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            # "Prev Page"
+            if current_page > 1:
+                if st.button("Prev Accounts"):
+                    st.session_state.account_page -= 1
+                    st.experimental_rerun()
+
+        with col2:
+            # "Next Page"
+            if current_page < total_pages:
+                if st.button("Next Accounts"):
+                    st.session_state.account_page += 1
+                    st.experimental_rerun()
+
 
     ###########################################################################
     # Delete Account
@@ -413,22 +435,14 @@ class StreamlitChatApp:
         st.warning("This will permanently delete your account and all associated messages!")
 
         if st.button("Confirm Delete Account"):
-            # 1) Confirm user still exists
-            if not self._user_exists(st.session_state.username):
-                st.error("Account does not exist.")
-                return
-
-            resp = self.client.send_request("delete_account", {})
+            resp = stub.DeleteAccount(chat_service_pb2.EmptyRequest(auth_token=st.session_state.auth_token))
             if not resp:
                 st.error("No response from server.")
                 return
-            if resp.get("status") == "ok":
+            if resp.status == "ok":
                 st.success("Account deleted successfully!")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
-                if "socket" in st.session_state:
-                    st.session_state["socket"].close()
-                    del st.session_state["socket"]
                 st.rerun()
             else:
                 st.error("Failed to delete the account.")
@@ -438,17 +452,14 @@ class StreamlitChatApp:
     ###########################################################################
     def show_logout_page(self):
         if st.button("Logout"):
-            resp = self.client.send_request("logout", {})
+            resp = stub.Logout(chat_service_pb2.EmptyRequest(auth_token=st.session_state.auth_token))
             if not resp:
                 st.error("No response from server.")
                 return
-            if resp.get("status") == "ok":
+            if resp.status == "ok":
                 st.success("Logged out.")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
-                if "socket" in st.session_state:
-                    st.session_state["socket"].close()
-                    del st.session_state["socket"]
                 st.rerun()
             else:
                 st.error("Logout was refused by the server.")
@@ -487,12 +498,14 @@ class StreamlitChatApp:
 # Entry point
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Setup connection
+    channel = grpc.insecure_channel("127.0.0.1:50051")
+    stub = chat_service_pb2_grpc.ChatServiceStub(channel)
     parser = argparse.ArgumentParser(description="JoChat Client")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address")
     parser.add_argument("--port", type=int, default=5555, help="Server port")
-    parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
-                        help="Protocol to use: 'json' or 'custom'")
+
     args = parser.parse_args()
 
-    app = StreamlitChatApp(server_host=args.host, server_port=args.port, protocol=args.protocol)
+    app = StreamlitChatApp(server_host=args.host, server_port=args.port)
     app.run_app()
