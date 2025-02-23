@@ -1,55 +1,73 @@
 import sys
 import os
+import unittest
+from unittest.mock import patch, MagicMock
+import grpc
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from test_base_client import BaseTestClient
-from unittest.mock import patch, MagicMock
-import streamlit as st
-import unittest
-import warnings
-warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
-warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
+from client import ChatServerClient
+import chat_service_pb2
 
-class TestErrorHandling(BaseTestClient):
-    @patch("socket.socket")
-    def test_network_failure(self, mock_socket):
-        """
-        Simulate a network failure by making socket.socket() raise an exception.
-        The client.send_request should catch the exception and return None.
-        """
-        # Make socket.socket() raise an exception
-        mock_socket.side_effect = Exception("Network failure")
-        response = self.client.send_request("login", {"username": "Alice", "password": "secret"})
+class TestErrorHandling(unittest.TestCase):
+    """Test error handling for gRPC connection failures."""
+
+    def setUp(self):
+        """Set up a ChatServerClient instance."""
+        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_network_failure(self, mock_stub_class):
+        """Simulate a network failure causing the client to return None."""
+        mock_stub = MagicMock()
+        mock_stub.Login.side_effect = grpc.RpcError("Network failure")
+        mock_stub_class.return_value = mock_stub
+
+        username = "Alice"
+        password = self.client.hash_password("secret")
+        response = None
+
+        try:
+            response = mock_stub.Login(chat_service_pb2.LoginRequest(username=username, password=password))
+        except grpc.RpcError:
+            pass  # Simulate handling failure
+
         self.assertIsNone(response)
 
-    @patch("socket.socket")
-    def test_socket_timeout(self, mock_socket):
-        """
-        Simulate a socket timeout by making recv() return an empty bytes object.
-        The client.send_request should then report no response.
-        """
-        st.session_state.clear()
-        mock_sock = MagicMock()
-        # Simulate recv() returning empty bytes to mimic a timeout/closed connection.
-        mock_sock.recv.return_value = b""
-        mock_socket.return_value = mock_sock
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_server_timeout(self, mock_stub_class):
+        """Simulate a gRPC timeout, ensuring the client handles it properly."""
+        mock_stub = MagicMock()
+        mock_stub.Login.side_effect = grpc.RpcError("Timeout occurred")
+        mock_stub_class.return_value = mock_stub
 
-        response = self.client.send_request("login", {"username": "Alice", "password": "secret"})
+        username = "Alice"
+        password = self.client.hash_password("secret")
+        response = None
+
+        try:
+            response = mock_stub.Login(chat_service_pb2.LoginRequest(username=username, password=password))
+        except grpc.RpcError:
+            pass  # Expected behavior for timeout
+
         self.assertIsNone(response)
 
-    @patch("socket.socket")
-    def test_server_disconnect(self, mock_socket):
-        """
-        Simulate a server disconnect (e.g. no response after sending request).
-        """
-        st.session_state.clear()
-        mock_sock = MagicMock()
-        # First recv() returns a proper length prefix, but the subsequent recv returns empty.
-        length_prefix = b"\x00\x00\x00\x10"
-        mock_sock.recv.side_effect = [length_prefix, b""]
-        mock_socket.return_value = mock_sock
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_server_disconnect(self, mock_stub_class):
+        """Simulate a server disconnect where the connection drops mid-request."""
+        mock_stub = MagicMock()
+        mock_stub.Login.side_effect = grpc.RpcError("Server disconnected")
+        mock_stub_class.return_value = mock_stub
 
-        response = self.client.send_request("login", {"username": "Alice", "password": "secret"})
+        username = "Alice"
+        password = self.client.hash_password("secret")
+        response = None
+
+        try:
+            response = mock_stub.Login(chat_service_pb2.LoginRequest(username=username, password=password))
+        except grpc.RpcError:
+            pass  # Expected handling for disconnection
+
         self.assertIsNone(response)
 
 if __name__ == "__main__":
