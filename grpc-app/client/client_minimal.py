@@ -3,6 +3,8 @@ import grpc
 import sys, os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+
 import chat_service_pb2
 import chat_service_pb2_grpc
 

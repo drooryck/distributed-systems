@@ -139,7 +139,7 @@ class StreamlitChatApp:
                     st.session_state.auth_token = resp.auth_token
                     st.rerun()
                 else:
-                    st.error(resp.msg) # may deprecate server sending this error msg later.
+                    st.error(str(resp.status)) # may deprecate server sending this error msg later.
 
             else:  # "Create Account"
                 signup_resp = stub.Signup(chat_service_pb2.SignupRequest(username=username, password=hashed_pw))
@@ -187,13 +187,9 @@ class StreamlitChatApp:
                 st.error("Please fill in all fields.")
                 return
 
-            data = {
-                "sender": st.session_state.username,
-                "recipient": recipient,
-                "content": message_text
-            }
+          
             # resp = self.client.send_request("send_message", data)
-            resp = stub.SendMessage(chat_service_pb2.SendMessageRequest(sender=data["sender"], recipient=data["recipient"], auth_token=st.session_state.auth_token))
+            resp = stub.SendMessage(chat_service_pb2.SendMessageRequest(auth_token=st.session_state.auth_token, recipient=recipient, content=message_text))
             if not resp:
                 st.error("No response from server.")
                 return
@@ -321,7 +317,7 @@ class StreamlitChatApp:
                 if not selected_msg_ids:
                     st.warning("No messages selected for deletion.")
                 else:
-                    del_resp = self.client.send_request("delete_messages", {"message_ids_to_delete": selected_msg_ids})
+                    #del_resp = self.client.send_request("delete_messages", {"message_ids_to_delete": selected_msg_ids})
                     del_resp = stub.DeleteMessages(chat_service_pb2.DeleteMessagesRequest(auth_token=st.session_state.auth_token, message_ids_to_delete=selected_msg_ids))
 
                     if not del_resp:
@@ -417,14 +413,14 @@ class StreamlitChatApp:
             if current_page > 1:
                 if st.button("Prev Accounts"):
                     st.session_state.account_page -= 1
-                    st.experimental_rerun()
+                    st.rerun()
 
         with col2:
             # "Next Page"
             if current_page < total_pages:
                 if st.button("Next Accounts"):
                     st.session_state.account_page += 1
-                    st.experimental_rerun()
+                    st.rerun()
 
 
     ###########################################################################

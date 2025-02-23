@@ -42,8 +42,11 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             return chat_service_pb2.GenericResponse(status="error", msg="Username and password are required")
         
         # user already logged in by any client
-        if username in self.logged_in_users.values():
-            return chat_service_pb2.GenericResponse(status="error", msg="User already logged in")
+        # handle this by logging out the old client with their auth token and given a new one (#mog)
+        for tok, logged_in_username in self.logged_in_users.items():
+            if logged_in_username == username:
+                del self.logged_in_users[tok]
+                break
         
         # we cant check if the client is logged in as someone else
         # the auth_token they are using deifnes who they are logged in as
