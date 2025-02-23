@@ -1,21 +1,23 @@
 ## JoChat  
 JoChat is a distributed messaging system that supports user authentication, message delivery, and account management.
 
+This version of JoChat works with gRPC, so no longer a need to specify a messaging protocol.
+
 ## Quick Setup & Deployment  
 To set up and run JoChat, follow these steps in a **fresh virtual environment** (for the love of that which is holy):
 You can find your local network's ip address by doing ifconfig. Get
 ```
 pip install -r requirements.txt
-make run-server  SERVER_ARGS=" # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)`` "
-make run-client  CLIENT_ARGS = " # (optional arguments: --host 0.0.0.0 --port 5000 --protocol json/binary)`` " 
+make run-server  SERVER_ARGS=" # (optional arguments: --host 0.0.0.0 --port 5000)`` "
+make run-client  CLIENT_ARGS = " # (optional arguments: --host 0.0.0.0 --port 5000)`` " 
 ```
 
 An example:
 ```
-make run-client CLIENT_ARGS="--protocol custom"
+make run-client CLIENT_ARGS="--ip 0.0.0.1"
 make run-server SERVER_ARGS="--port 5001"
 or simply
-make run-all SERVER_ARGS="--port 5001" CLIENT_ARGS="--protocol custom"
+make run-all SERVER_ARGS="--port 5001" CLIENT_ARGS=""
 ```
 
 If you are confused, run
@@ -38,11 +40,9 @@ messaging-app/
 │   │── client.py                   # Main client script
 │   │── test_suite_client/           # Test suite for client-side functionality
 │── protocol/                        # Protocol implementation
-│   │── protocol.py                   # Custom binary wire protocol implementation
-│   │── spec.md                       # Detailed specification of the wire protocol
+│   │── chat_service.proto           # gRPC protocol, message definitions.
 │── server/                        # Server-side implementation
 │   │── server.py                   # Main server script
-│   │── actions.py                  # Handles server-side actions
 │   │── database.py                  # Database interaction functions
 │   │── chat.db                      # SQLite database for storing users and messages
 │   │── chat.db-journal              # SQLite journal file for database transactions
@@ -63,11 +63,10 @@ The server is the **backbone** of JoChat.
   - **Recipient**
   - **Message content**
   - **Delivery status**
-- Messages sent while the recipient is offline are marked as **"sent while away"**, ensuring delivery when they log back in.
-- Uses a **threading model**, where each connected client is handled in a separate thread with a separate action queue.
-- Implements a **request-response model**, where clients send requests (e.g., `"send_message"`, `"fetch_away_msgs"`, `"delete_account"`), and the server responds with data or status updates.
-- The server processes actions using a **queue per client**.
-- **Concurrency control:** Implements a **coarse-grained locking mechanism**, where basically a server can handle one client action at a time, but does not need to finish one user's action queue before moving on.
+- Messages sent while the recipient is offline are marked as **"sent while away"**, ensuring delivery when they log back in can happen manually.
+- Implements a **request-response model**, where clients send requests (e.g., `"send_message"`, `"fetch_away_msgs"`, `"delete_account"`), and the server responds with data or status updates. This corresponds to the "simple gRPC" paradigm.
+- The server processes actions using one thread per action it does at a time.
+- **Concurrency control:** Implements a **coarse-grained locking mechanism**, where basically a server can handle requests in any order it wants.
 - **Security:** Passwords are **hashed using SHA-256** before transmission on the client side. Clients are responsible for hashing their passwords.
 ### The Client 
 
@@ -76,16 +75,17 @@ The client side is handled entirely with the file `client.py` with modular desig
 - **User Interface**: Providing a user-friendly interface for users to interact with the server.
 - **Handling User Input**: Sending user input to the server and displaying server responses.
 - **Displaying Messages**: Showing messages from other users in real-time.
-- **Ensuring Structured Communication**: Sending and receiving messages in the correct format and protocol (JSON or binary).
+- **Ensuring Structured Communication**: Sending and receiving messages in the correct format and protocol (gRPC).
 
 #### Client-server connection
+The ChatServerClient class encapsulates the client–server connection using gRPC rather than raw TCP sockets. It handles creating a gRPC channel, sending requests to the server through generated stubs, and receiving structured protobuf responses. Its key methods and responsibilities are:
 
-For client-server connection, the `ChatServerClient` class is responsible for maintaining a persistent connection with the server using TCP sockets. It sends structured requests to the server and receives responses. Upon initialization with the host, port, and protocol specified, it connects to the server for communication, doing so via the following methods:
 
-- **`__init__`**: initializes the client with the server's host, port, and protocol
-- **`_get_socket`**: establishes a connection with the server using TCP sockets
-- **`send_request`**: builds a request message and sends it to the server (with `is_response` flag set to `0`), returning the server's response data
-- **`hash_password`**: hashes user's UTF-8-encoded password using SHA-256
+- **`__init__`**: Initializes the client with the server’s host and port. It sets up a gRPC channel and stores references to any generated stubs (ChatServiceStub) for making requests.
+
+- **`hash_password`**: Hashes a user’s UTF-8-encoded password using SHA-256 before sending it to the server (to avoid storing plain-text passwords).
+
+By relying on gRPC, the client no longer needs to manage its own sockets or parse raw byte streams—all message handling is taken care of by the protobuf definitions and the generated gRPC code.
 
 #### Streamlit UI
 
@@ -99,9 +99,6 @@ The `StreamlitChatApp` class is the main application page for the Streamlit user
 - **`run_app`**: main entry point for the Streamlit app, running the app and displaying the appropriate page based on the user's current state and actions
 
 Overall, the UI is designed to provide a real-time messaging experience with features like an unread message counter, dynamically updated inbox, and user authentication management. All pages are accessible at any time via the sidebar, and each session operates under a single logged-in user to ensure session integrity.
-
-### For the **custom binary protocol**, refer to [`protocol/spec.md`](spec.md) ' in the protocol folder.
-
 
 ### Testing & Quality Assurance 
 JoChat includes a comprehensive unit test suite, and has undergone integration testing. 
@@ -131,19 +128,6 @@ Easy as pie.
   - Connection handling  
   - Sending and receiving messages  
   - UI interactions
-  
-## Custom Protocol Implementation  
-
-JoChat supports **two wire protocols**:  
-
-1. **JSON Protocol**   
-2. **Custom Binary Protocol** (reduced bandwidth)  
-
-Every message in the **custom protocol** follows this structure:  
-
-1. **Operation ID (1 byte)** – Identifies the request/response type.  
-2. **is_response flag (1 byte)** – `0` for requests, `1` for responses.  
-3. **Payload** – Contains message-specific fields as described in [`spec.md`](spec.md).  
 
 Happy messaging on JoChat.
 Dries and Jo.
