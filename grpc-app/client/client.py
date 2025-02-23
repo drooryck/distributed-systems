@@ -7,17 +7,19 @@ import struct  # For packing/unpacking the 4-byte length prefix
 import time
 import argparse
 
-# pip install streamlit-autorefresh
 from streamlit_autorefresh import st_autorefresh
-
 import sys, os
+
+# Adjust import to your protocol's actual location
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from protocol.protocol import Message, JSONProtocolHandler, CustomProtocolHandler
 
-
+###############################################################################
+# ChatServerClient
+###############################################################################
 class ChatServerClient:
     """
-    Encapsulates server connection behavior using the new custom binary protocol.
+    Encapsulates server connection behavior using a custom or JSON protocol.
     All client→server messages are requests (is_response=False);
     the server replies with is_response=True.
     """
@@ -25,7 +27,6 @@ class ChatServerClient:
     def __init__(self, server_host, server_port, protocol):
         self.server_host = server_host
         self.server_port = server_port
-        self.protocol = protocol
         if protocol == "json":
             self.protocol_handler = JSONProtocolHandler()
         else:
@@ -53,10 +54,9 @@ class ChatServerClient:
             return None
         try:
             message = Message(msg_type, data or {})
-            self.protocol_handler.send(sock, message, is_response=False) # all client→server messages are requests
+            self.protocol_handler.send(sock, message, is_response=False)
             response = self.protocol_handler.receive(sock)
             return response.data if response else None
-
         except Exception as e:
             st.error(f"Error communicating with server: {e}")
             return None
@@ -66,6 +66,9 @@ class ChatServerClient:
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+###############################################################################
+# StreamlitChatApp
+###############################################################################
 class StreamlitChatApp:
     """
     Main application class for our Streamlit-based Chat App.
@@ -76,45 +79,32 @@ class StreamlitChatApp:
     Also includes ephemeral messages in the UI:
       - When new online messages arrive automatically,
       - When offline messages are manually fetched (partial fetching).
+
+    Provides local, case-wise logic for common user actions and errors.
+
+    Data in st.session_state is limited to:
+      - logged_in, username, inbox_page (so the user remains on the same page in the inbox)
     """
 
     def __init__(self, server_host="127.0.0.1", server_port=5555, protocol="json"):
         self.server_host = server_host
         self.server_port = server_port
         self.client = ChatServerClient(server_host, server_port, protocol)
-        self._initialize_session_state()
+        self._init_session_state()
 
-    def _initialize_session_state(self):
-        """
-        Initialize any session_state variables if they do not exist yet.
-        """
+    def _init_session_state(self):
+        # Persistent across pages
         if "logged_in" not in st.session_state:
             st.session_state.logged_in = False
-        if "all_messages" not in st.session_state:
-            st.session_state.all_messages = []
-        if "unread_count" not in st.session_state:
-            st.session_state.unread_count = 0
         if "username" not in st.session_state:
             st.session_state.username = ""
+        # we need the current page we are on in our inbox, because we cannot
+        # expect the server to remember what page we are on and only deliver
+        # us the messages from those pages
         if "inbox_page" not in st.session_state:
             st.session_state.inbox_page = 0
-        if "manual_fetch_count" not in st.session_state:
-            st.session_state.manual_fetch_count = 5
-
-        # For listing accounts
-        if "account_pattern" not in st.session_state:
-            st.session_state.account_pattern = ""
-        if "account_start" not in st.session_state:
-            st.session_state.account_start = 0
-        if "account_count" not in st.session_state:
-            st.session_state.account_count = 10
-        if "found_accounts" not in st.session_state:
-            st.session_state.found_accounts = []
 
     def apply_custom_css(self):
-        """
-        Injects custom CSS into the Streamlit app for improved styling.
-        """
         st.markdown(
             """
             <style>
@@ -151,23 +141,14 @@ class StreamlitChatApp:
             unsafe_allow_html=True
         )
 
-    def _update_unread_count(self):
-        """
-        Calls 'count_unread' on the server to get the number of messages 
-        that have not yet been delivered (to_deliver==0) and sets st.session_state.unread_count.
-        """
-        resp = self.client.send_request("count_unread", {})
-        if resp and resp.get("status") == "ok":
-            st.session_state.unread_count = resp.get("unread_count", 0)
-
+    ###########################################################################
+    # Login / Signup
+    ###########################################################################
     def show_login_or_signup_page(self):
-        """
-        Page to login or create an account.
-        """
         st.header("Login or Create Account")
         action = st.radio("Select Action", ["Login", "Create Account"])
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
 
         if st.button(action):
             if not username or not password:
@@ -175,70 +156,61 @@ class StreamlitChatApp:
                 return
 
             hashed_pw = self.client.hash_password(password)
-            data = {"username": username, "password": hashed_pw}
 
             if action == "Login":
-                response = self.client.send_request("login", data)
-                if response is None:
-                    st.error("No response from server. Check that the server is running.")
+                # Attempt login
+                resp = self.client.send_request("login", {"username": username, "password": hashed_pw})
+                if not resp:
+                    st.error("No response from server.")
                     return
-
-                if response.get("status") == "ok":
+                if resp.get("status") == "ok":
                     st.success("Logged in successfully!")
-                    # Clear any cached messages on new login
-                    st.session_state.all_messages = []
                     st.session_state.logged_in = True
                     st.session_state.username = username
-                    st.session_state.unread_count = response.get("unread_count", 0)
-                    # Immediately fetch any pending messages:
-                    self._auto_fetch_inbox()
-                    # Re-run script to update the UI
                     st.rerun()
                 else:
-                    st.error(response.get("msg", "Action failed."))
+                    st.error("Wrong password.")
 
-
-            else:  # Create Account
-                signup_resp = self.client.send_request("signup", data)
-                if signup_resp is None:
-                    st.error("No response from server. Check that the server is running.")
+            else:  # "Create Account"
+                signup_resp = self.client.send_request("signup", {"username": username, "password": hashed_pw})
+                print(signup_resp)
+                if not signup_resp:
+                    st.error("No response from server.")
+                    return
+                if signup_resp.get("status") != "ok":
+                    st.error(signup_resp.get("msg", "Account creation failed."))
                     return
 
-                if not signup_resp.get("status") == "ok":
-                    st.error(signup_resp.get("msg", "Action failed."))
-                    return
-
-                # Auto-login after successful creation
-                login_resp = self.client.send_request("login", data)
+                # 3) Auto-login
+                login_resp = self.client.send_request("login", {"username": username, "password": hashed_pw})
+                # Should not happen, but just in case
                 if not login_resp or login_resp.get("status") != "ok":
                     st.error("Account created but auto-login failed.")
                     return
 
                 st.success("Account created and logged in successfully!")
-                st.session_state.all_messages = []  # Clear cached messages
                 st.session_state.logged_in = True
                 st.session_state.username = username
-                st.session_state.unread_count = login_resp.get("unread_count", 0)
-                self._auto_fetch_inbox()
                 st.rerun()
 
+    ###########################################################################
+    # Home Page
+    ###########################################################################
     def show_home_page(self):
-        """
-        Displays a simple home/landing page upon successful login.
-        """
         st.header("Welcome!")
-        st.write(f"You have {st.session_state.unread_count} unread message(s).")
-        st.info("Use the sidebar to navigate to Send Message, Inbox, List Accounts, or Delete Account, or Logout.")
+        resp = self.client.send_request("count_unread", {})
+        if resp and resp.get("status") == "ok":
+            unread_count = resp.get("unread_count", 0)
+        st.write(f"You have {unread_count} unread message(s).")
+        st.info("Use the sidebar to navigate to Send Message, Inbox, List Accounts, Delete Account, or Logout.")
 
+    ###########################################################################
+    # Send Message
+    ###########################################################################
     def show_send_message_page(self):
-        """
-        Page to send a new message to another user.
-        (If the user is logged in, the server sets to_deliver=1 for immediate delivery;
-         otherwise, the message will be stored for later manual fetching.)
-        """
         st.header("Send a Message")
-        recipient = st.text_input("Recipient Username", key="recipient")
-        message_text = st.text_area("Message", key="message_text")
+        recipient = st.text_input("Recipient Username")
+        message_text = st.text_area("Message")
 
         if st.button("Send"):
             if not recipient or not message_text:
@@ -251,107 +223,86 @@ class StreamlitChatApp:
                 "content": message_text
             }
             resp = self.client.send_request("send_message", data)
-            if resp is None:
-                st.error("No response from server. Check that the server is running.")
-            elif resp.get("status") != "ok":
-                st.error(resp.get("msg", "Failed to send message."))
-            else:
+            if not resp:
+                st.error("No response from server.")
+                return
+            if resp.get("status") == "ok":
                 st.success("Message sent!")
-                # Update unread count if needed
-                self._update_unread_count()
+            else:
+                st.error("Message send failure.")
 
-    def _auto_fetch_inbox(self):
-        """
-        Called every 5 seconds to fetch messages that arrived while the user was logged in.
-        Only fetches **new** messages that were marked for immediate delivery (to_deliver==1).
-        """
-        resp = self.client.send_request("send_messages_to_client", {})
-        if resp and resp.get("status") == "ok":
-            returned_msgs = resp.get("msg", [])
-            existing_ids = {m["id"] for m in st.session_state.all_messages}
-            newly_added = 0
-            
-            # Add only new messages that are not already in the inbox.
-            for m in returned_msgs:
-                if m["id"] not in existing_ids:
-                    st.session_state.all_messages.append(m)
-                    newly_added += 1
-            
-            if newly_added > 0:
-                st.info(f"Auto-delivered {newly_added} new message(s).")
+ 
 
-            self._update_unread_count()
-
+    ###########################################################################
+    # Inbox
+    ###########################################################################
     def show_inbox_page(self):
-        """
-        The main inbox page.
-
-          1) Auto-fetch every 5s for new messages (to_deliver==1)
-          2) Manual fetch for offline messages (to_deliver==0)
-          3) Display messages in LIFO order, 10 per page.
-        """
         st.header("Inbox")
-
-        # Auto-refresh every 5 seconds
         st_autorefresh(interval=5000, key="inbox_autorefresh")
 
-        # Step 1: auto fetch for messages marked for immediate delivery.
-        self._auto_fetch_inbox()
 
+        # this is an input field, it just defines the button on the page
         st.write("**Manually fetch offline messages**")
-        st.session_state.manual_fetch_count = st.number_input(
+        manual_fetch_count = st.number_input(
             "How many offline messages to fetch at once?",
             min_value=1,
             max_value=100,
-            value=st.session_state.manual_fetch_count,
+            value=5,  # default
             step=1
         )
 
-        # Step 2: manual fetch for offline messages (to_deliver==0)
         if st.button("Fetch Manually"):
-            if st.session_state.manual_fetch_count <= 0:
-                st.warning("Enter a positive number!")
+            if manual_fetch_count <= 0:
+                st.warning("Enter a positive number.")
                 return
-            away_resp = self.client.send_request(
-                "fetch_away_msgs",
-                {"limit": st.session_state.manual_fetch_count}
-            )
+            
+            away_resp = self.client.send_request("fetch_away_msgs", {"limit": manual_fetch_count})
+
+            if not away_resp:
+                st.error("No response from server.")
+                return
+            
             if away_resp and away_resp.get("status") == "ok":
-                new_away = away_resp.get("msg", [])
-                if new_away:
-                    existing_ids = {m["id"] for m in st.session_state.all_messages}
-                    added_count = 0
-                    for m in new_away:
-                        if m["id"] not in existing_ids:
-                            st.session_state.all_messages.append(m)
-                            added_count += 1
-                    st.success(f"Manually fetched {added_count} offline message(s).")
-                    time.sleep(1)  # Prevent immediate rerun from wiping out success message
-                    st.rerun()
-                else:
-                    st.info("No new offline messages were found.")
+                st.rerun() # or somethign like
             else:
                 st.error("Manual fetch failed or returned an error.")
 
-        # Pagination
-        MESSAGES_PER_PAGE = 10
-        all_msgs = st.session_state.all_messages
-        total_msgs = len(all_msgs)
 
+        # 3) Pagination uses st.session_state.inbox_page
+        # NO IT BETTER NOT.
+
+        MESSAGES_PER_PAGE = 10
+
+        all_msgs = self.client.send_request("send_messages_to_client", {})
+
+        if not all_msgs:
+            st.error("No response from server.")
+            return
+
+        if all_msgs.get("status") == "ok":
+            msgs = all_msgs.get("msg", [])
+        else:
+            st.error("Could not fetch messages.")
+
+        total_msgs = len(msgs)
         if total_msgs == 0:
             st.info("No messages in your inbox yet.")
             return
 
+        # at this stage we have 'msgs' which is a list of messages, and we have 'total_msgs'
+
+        # the total number of pages at this moment that the user can scroll thru
         total_pages = (total_msgs + MESSAGES_PER_PAGE - 1) // MESSAGES_PER_PAGE
 
-        # Ensure page number is in a valid range
+        # set the inbox page to the last page if it is was greater than how many pages there will now be.
         st.session_state.inbox_page = min(st.session_state.inbox_page, total_pages - 1)
         st.session_state.inbox_page = max(st.session_state.inbox_page, 0)
 
-        # Display page number info
+        # writing the page number on the app.
         st.write(f"**Page {st.session_state.inbox_page + 1} / {total_pages}**")
 
-        # Next/Prev page controls (conditionally displayed)
+
+        # bloody mess, no idea why this needs to be like this. maybe streamlit problem.
         colA, colB = st.columns(2)
         with colA:
             if total_pages > 1 and st.session_state.inbox_page > 0:
@@ -364,189 +315,134 @@ class StreamlitChatApp:
                     st.session_state.inbox_page += 1
                     st.rerun()
 
-        # Sort messages in LIFO order
-        sorted_msgs = sorted(all_msgs, key=lambda x: x.get("id", 0), reverse=True)
+        # sorting by id implicitly sorts by time, because messages are assigned rising ids in the server.
+        sorted_msgs = sorted(msgs, key=lambda x: x.get("id", 0), reverse=True)
         start_idx = st.session_state.inbox_page * MESSAGES_PER_PAGE
         end_idx = start_idx + MESSAGES_PER_PAGE
         page_msgs = sorted_msgs[start_idx:end_idx]
 
-        if page_msgs:
+        if not page_msgs:
+            st.info("No messages on this page.")
+        else: # there are messages to show:
             st.markdown("### Messages in your inbox (latest first):")
+            
             selected_msg_ids = []
-            for msg in page_msgs:
+
+            for cur_msg in page_msgs:
                 cols = st.columns([0.07, 0.93])
+
+                # load the checkbox for deleting messages
                 with cols[0]:
-                    selected = st.checkbox("selected", key=f"select_{msg['id']}", label_visibility="collapsed")
+                    selected = st.checkbox("selected", key=f"select_{cur_msg['id']}", label_visibility="collapsed")
+                    if selected: # keep track of the checkbox-selected messages
+                        selected_msg_ids.append(cur_msg["id"])
+
+                # load the message itself, its id, its sender, and its content.
                 with cols[1]:
-                    st.markdown(f"**ID:** {msg['id']} | **From:** {msg.get('sender')}")
+                    st.markdown(f"**ID:** {cur_msg['id']} | **From:** {cur_msg.get('sender')}")
                     st.markdown(
-                        f"<div style='padding: 0.5rem 0;'>{msg.get('content')}</div>",
+                        f"<div style='padding: 0.5rem 0;'>{cur_msg.get('content')}</div>",
                         unsafe_allow_html=True
                     )
-                st.markdown("---")
-                if selected:
-                    selected_msg_ids.append(msg["id"])
+                st.markdown("---") # a little divider
 
-            # Deletion
+            
+            # logic for deleting all the messages that have been selected (are in a list)
             if st.button("Delete Selected"):
                 if not selected_msg_ids:
                     st.warning("No messages selected for deletion.")
                 else:
-                    del_resp = self.client.send_request(
-                        "delete_messages",
-                        {"message_ids_to_delete": selected_msg_ids}
-                    )
-                    if del_resp and del_resp.get("status") == "ok":
+                    del_resp = self.client.send_request("delete_messages", {"message_ids_to_delete": selected_msg_ids})
+
+                    if not del_resp:
+                        st.error("No response from server.")
+                        return
+                    
+                    if del_resp.get("status") == "ok":
                         st.success(f"Deleted {len(selected_msg_ids)} message(s).")
-                        # Remove deleted messages from local cache
-                        st.session_state.all_messages = [
-                            m for m in st.session_state.all_messages
-                            if m["id"] not in selected_msg_ids
-                        ]
-                        self._auto_fetch_inbox()
                         st.rerun()
                     else:
-                        st.error("Failed to delete selected messages.")
-        else:
-            st.info("No messages on this page.")
+                        st.error("Deletion of selected messages failed.")
 
+    ###########################################################################
+    # List Accounts
+    ###########################################################################
     def show_list_accounts_page(self):
-        """
-        A page that searches for user accounts by pattern, with basic pagination.
-        If user enters '*', interpret that as '%'.
-        """
         st.header("Search / List Accounts")
 
-        # Local data to this function 
-        st.session_state.account_pattern = st.text_input(
-            "Username Pattern (enter * for all)",
-            value=st.session_state.get("account_pattern", "")
-        )
-        st.session_state.account_count = st.number_input(
-            "Accounts per page",
-            min_value=1,
-            max_value=50,
-            value=st.session_state.get("account_count", 10),
-            step=1
-        )
+        # local input for search pattern, etc.
+        account_pattern = st.text_input("Username Pattern (enter * for all)", "")
+        account_count = st.number_input("Accounts per page", min_value=1, max_value=50, value=10, step=1)
 
         if st.button("Search / Refresh"):
-            if not st.session_state.account_pattern.strip():
+            if not account_pattern.strip():
                 st.warning("Username pattern cannot be empty.")
             else:
-                # Reset to the first page and refresh total count.
-                st.session_state.account_start = 0
-                self._search_accounts(refresh_total=True)
+                self._perform_account_search(account_pattern, account_count)
 
-        if "found_accounts" in st.session_state:
-            if st.session_state.found_accounts:
-                st.markdown("**Matching Accounts**:")
-                for acc in st.session_state.found_accounts:
-                    st.write(f"- {acc}")
-
-                # Calculate the current page number.
-                current_page = (st.session_state.account_start // st.session_state.account_count) + 1
-                # Compute total pages using the stored total count.
-                total_found = st.session_state.get("total_found", len(st.session_state.found_accounts))
-                total_pages = (total_found + st.session_state.account_count - 1) // st.session_state.account_count
-                st.write(f"**Page {current_page} / {total_pages}**")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    if current_page > 1:
-                        if st.button("Prev Accounts"):
-                            st.session_state.account_start -= st.session_state.account_count
-                            if st.session_state.account_start < 0:
-                                st.session_state.account_start = 0
-                            # For pagination moves (not refresh), do not update total count.
-                            self._search_accounts(refresh_total=False)
-                with col2:
-                    if current_page < total_pages:
-                        if st.button("Next Accounts"):
-                            st.session_state.account_start += st.session_state.account_count
-                            self._search_accounts(refresh_total=False)
-            else:
-                st.warning("No accounts found matching your search criteria.")
-                st.session_state.found_accounts = []
-        else:
-            st.info("Enter a search pattern and click 'Search / Refresh' to list accounts.")
-
-
-    def _search_accounts(self, refresh_total=False):
-        """
-        Helper function to call the server's 'list_accounts' action.
-        If user enters '*', interpret that as '%'.
-        If 'account_count' <= 0, do not send any request.
-        
-        If refresh_total is True, we perform an additional query with a high count
-        to determine the total number of matching accounts.
-        """
-        pattern = st.session_state.account_pattern.strip()
-        if pattern == "*":
+    def _perform_account_search(self, pattern, count):
+        """Search accounts (local pagination approach: we just do a single query)."""
+        if pattern.strip() == "*":
             pattern = "%"
-        start = st.session_state.account_start
-        count = st.session_state.account_count
 
-        if count <= 0:
-            st.warning("Cannot list 0 accounts per page. Please choose a valid page size.")
+        data = {"pattern": pattern, "start": 0, "count": count}
+        resp = self.client.send_request("list_accounts", data)
+        if not resp:
+            st.error("No response from server while listing accounts.")
             return
 
-        # Optionally refresh total count (or if we're on the first page)
-        if refresh_total or start == 0:
-            data_total = {"pattern": pattern, "start": 0, "count": 1000}
-            resp_total = self.client.send_request("list_accounts", data_total)
-            if resp_total and resp_total.get("status") == "ok":
-                # Expect the server to return a list; if tuples, extract the username (index 1)
-                accounts_total = resp_total.get("users", [])
-                st.session_state.total_found = len(
-                    [acc[1] if isinstance(acc, (list, tuple)) else acc for acc in accounts_total]
-                )
-            else:
-                st.session_state.total_found = 0
-
-        # Regular pagination query
-        data = {"pattern": pattern, "start": start, "count": count}
-        resp = self.client.send_request("list_accounts", data)
-        if resp and resp.get("status") == "ok":
-            accounts = resp.get("users", [])
-            # Convert each account to username only: if tuple, take index 1; otherwise, use as is.
-            st.session_state.found_accounts = [acc[1] if isinstance(acc, (list, tuple)) else acc for acc in accounts]
+        if resp.get("status") == "ok":
+            results = resp.get("users", [])
+            if not results:
+                st.warning("No accounts found matching your search criteria.")
+                return
+            st.markdown("**Matching Accounts**:")
+            for acc in results:
+                if isinstance(acc, (list, tuple)) and len(acc) == 2:
+                    st.write(f"- ID {acc[0]} => {acc[1]}")
+                else:
+                    st.write(f"- {acc}")
         else:
             st.error("Could not list accounts.")
-            st.session_state.found_accounts = []
 
+    ###########################################################################
+    # Delete Account
+    ###########################################################################
     def show_delete_account_page(self):
-        """
-        Page for the user to delete their own account. 
-        Calls 'delete_account' server action.
-        After success, logs them out and resets local state.
-        """
         st.header("Delete My Account")
         st.warning("This will permanently delete your account and all associated messages!")
 
         if st.button("Confirm Delete Account"):
+            # 1) Confirm user still exists
+            if not self._user_exists(st.session_state.username):
+                st.error("Account does not exist.")
+                return
+
             resp = self.client.send_request("delete_account", {})
-            if resp and resp.get("status") == "ok":
+            if not resp:
+                st.error("No response from server.")
+                return
+            if resp.get("status") == "ok":
                 st.success("Account deleted successfully!")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
-                st.session_state.unread_count = 0
-                st.session_state.all_messages = []
                 if "socket" in st.session_state:
                     st.session_state["socket"].close()
                     del st.session_state["socket"]
                 st.rerun()
             else:
-                st.error("Failed to delete account, or you are not logged in.")
+                st.error("Failed to delete the account.")
 
+    ###########################################################################
+    # Logout
+    ###########################################################################
     def show_logout_page(self):
-        """
-        Shows a logout button, which invalidates the session in the server
-        and resets local state.
-        """
         if st.button("Logout"):
-            response = self.client.send_request("logout", {})
-            if response and response.get("status") == "ok":
+            resp = self.client.send_request("logout", {})
+            if not resp:
+                st.error("No response from server.")
+                return
+            if resp.get("status") == "ok":
                 st.success("Logged out.")
                 st.session_state.logged_in = False
                 st.session_state.username = ""
@@ -555,20 +451,17 @@ class StreamlitChatApp:
                     del st.session_state["socket"]
                 st.rerun()
             else:
-                st.error(response.get("msg", "Logout failed."))
+                st.error("Logout was refused by the server.")
 
+    ###########################################################################
+    # Main run_app
+    ###########################################################################
     def run_app(self):
-        """
-        Main entry point for the Streamlit application.
-        Routes to the appropriate page based on whether or not the user is logged in.
-        """
         self.apply_custom_css()
-
         st.title("JoChat")
 
         if st.session_state.logged_in:
             st.sidebar.markdown(f"**User: {st.session_state.username}**")
-
             menu = st.sidebar.radio(
                 "Navigation",
                 ["Home", "Send Message", "Inbox", "List Accounts", "Delete Account", "Logout"]
@@ -591,17 +484,15 @@ class StreamlitChatApp:
 
 
 # -----------------------------------------------------------------------------
-# Actually run the app (Streamlit entry point)
+# Entry point
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JoChat Client")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=5555, help="Server port (default: 5555)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Server IP address")
+    parser.add_argument("--port", type=int, default=5555, help="Server port")
     parser.add_argument("--protocol", type=str, choices=["json", "custom"], default="json",
-                        help="Protocol to use: 'json' or 'custom' (default: json)")
-
+                        help="Protocol to use: 'json' or 'custom'")
     args = parser.parse_args()
 
-    # Pass the chosen protocol dynamically
     app = StreamlitChatApp(server_host=args.host, server_port=args.port, protocol=args.protocol)
     app.run_app()

@@ -18,9 +18,9 @@ message GenericResponse {
 // Some actions return extra fields (like unread_count).
 // For example, "login" returns an auth_token and unread_count
 message LoginResponse {
-  string status = 1;
-  string msg    = 2;
-  string auth_token = 3;
+  string auth_token = 1; // 
+  string status = 2;
+  string msg    = 3;
   int32 unread_count = 4;
 }
 
@@ -66,12 +66,13 @@ message DeleteMessagesResponse {
 
 // ========== REQUEST MESSAGES ==========
 
-// For "signup" or "login"
+// For signup
 message SignupRequest {
   string username = 1;
   string password = 2;  // e.g. "password hash"
 }
 
+// # for 'login"
 message LoginRequest {
   string username = 1;
   string password = 2;  // e.g. "password hash"
@@ -101,25 +102,24 @@ message SendMessagesToClientRequest {
   string auth_token = 1;
 }
 
-
 // For "fetch_away_msgs"
 message FetchAwayMsgsRequest {
-  int32 limit = 1;
-  string auth_token = 2;
+  string auth_token = 1;
+  int32 limit = 2;
 }
 
 // For "list_accounts"
 message ListAccountsRequest {
-  string pattern = 1; 
-  int32 start = 2;
-  int32 count = 3;
-  string auth_token = 4;
+  string auth_token = 1;
+  string pattern = 2; 
+  int32 start = 3;
+  int32 count = 4;
 }
 
 // For "delete_messages"
 message DeleteMessagesRequest {
-  repeated int32 message_ids_to_delete = 1;
-  string auth_token = 2;
+  string auth_token = 1;
+  repeated int32 message_ids_to_delete = 2;
 }
 
 // ========== SERVICE DEFINITION ==========
