@@ -93,8 +93,10 @@ message CountUnreadRequest {
 
 // For "send_message"
 message SendMessageRequest {
-  string content   = 1; // the server knows via the auth token who the sender is
-  string auth_token = 2;
+  string auth_token = 1;
+  string recipient = 2;
+  string content   = 3; // the server knows via the auth token who the sender is
+
 }
 
 // for "send_messages_to_client"

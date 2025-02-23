@@ -100,7 +100,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             unread_count=unread_count  # Example data, should come from DB
         )
 
-    def Logout(self, request, context):
+    def Logout(self, request):
         """Handles user logout."""
     
         if request.auth_token not in self.logged_in_users:
@@ -112,6 +112,27 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             status="ok",
             msg="You have been logged out."
         )
+    
+    def CountUnread(self, request):
+        """Handles unread message count requests."""
+
+        if request.auth_token not in self.logged_in_users:
+            return chat_service_pb2.GenericResponse(status="error", msg="Not logged in")
+
+        result = self.db.execute(""" SELECT COUNT(*) FROM messages WHERE recipient=? AND to_deliver=0 """, (self.logged_in_users[request.auth_token],))
+
+        unread_count = result[0][0] if result else 0  # Handle empty result
+
+        return chat_service_pb2.CountUnreadResponse(status="ok", msg="Unread count fetched", count=unread_count)
+
+    def SendMessage(self, request):
+        content, auth_token = request.content, request.auth_token
+        
+
+
+
+    
+
 
 def serve():
     db = Database("chat.db")
