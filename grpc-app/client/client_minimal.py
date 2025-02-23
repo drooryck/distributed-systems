@@ -1,4 +1,8 @@
 import grpc
+
+import sys, os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import chat_service_pb2
 import chat_service_pb2_grpc
 
@@ -24,5 +28,5 @@ print("Login Response:", login_response.status, login_response.msg, "Auth Token:
 # Logout Request
 if auth_token:
     print("\nLogging out...")
-    logout_response = stub.Logout(chat_service_pb2.LogoutRequest(auth_token=auth_token))
+    logout_response = stub.Logout(chat_service_pb2.EmptyRequest(auth_token=auth_token))
     print("Logout Response:", logout_response.status, logout_response.msg)
