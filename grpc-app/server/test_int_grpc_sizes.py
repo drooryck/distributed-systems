@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Integration test file that measures gRPC request/response sizes for all 11 RPC methods
-defined in chat_service.proto. Place this file under your 'integration_tests/' folder
-and run it after your server is up (e.g., 'python -m unittest integration_tests.test_integration_grpc_sizes').
+defined in chat_service.proto.
 """
 
 import unittest
@@ -72,7 +71,6 @@ class TestGrpcMessageSizes(unittest.TestCase):
     def setUpClass(cls):
         """
         Create an insecure channel with SizeMeasuringInterceptor attached.
-        For best accuracy, disable compression on both client & server.
         """
         cls.size_interceptor = SizeMeasuringInterceptor()
 
