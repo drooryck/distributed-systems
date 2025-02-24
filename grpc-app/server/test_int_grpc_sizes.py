@@ -1,60 +1,118 @@
 #!/usr/bin/env python3
 """
-Integration test file that measures gRPC request/response sizes for all 11 RPC methods
-defined in chat_service.proto.
+Integration test file that measures both gRPC protobuf payload sizes (per RPC)
+and full bytes (including HTTP/2 framing, headers, etc.) passed over the wire,
+via a simple TCP proxy. This version provides a per-RPC breakdown of full bytes.
 """
 
 import unittest
 import grpc
 import sys
 import os
+import threading
+import socket
+import socketserver
 
 # Adjust Python path to import generated code
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import chat_service_pb2
 import chat_service_pb2_grpc
 
 ###############################################################################
-# Interceptor to measure request/response sizes
+# TCP Proxy to capture full integration test bytes
+###############################################################################
+class TCPProxyHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        # Connect to the actual server.
+        remote_socket = socket.create_connection(
+            (self.server.remote_host, self.server.remote_port)
+        )
+        # Start two threads to handle bidirectional data transfer.
+        threads = []
+        threads.append(threading.Thread(target=self.forward, args=(self.request, remote_socket, 'cs')))
+        threads.append(threading.Thread(target=self.forward, args=(remote_socket, self.request, 'sc')))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        remote_socket.close()
+
+    def forward(self, source, destination, direction):
+        try:
+            while True:
+                data = source.recv(4096)
+                if not data:
+                    break
+                destination.sendall(data)
+                # Update the proxy's byte counters.
+                if direction == 'cs':
+                    self.server.total_client_to_server += len(data)
+                else:
+                    self.server.total_server_to_client += len(data)
+        except Exception:
+            # Ignore exceptions for simplicity.
+            pass
+
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
+    def __init__(self, server_address, RequestHandlerClass, remote_host, remote_port):
+        super().__init__(server_address, RequestHandlerClass)
+        self.remote_host = remote_host
+        self.remote_port = remote_port
+        self.total_client_to_server = 0  # Total bytes from client to server.
+        self.total_server_to_client = 0  # Total bytes from server to client.
+
+class TCPProxy:
+    def __init__(self, listen_host, listen_port, remote_host, remote_port):
+        self.server = ThreadedTCPServer(
+            (listen_host, listen_port), TCPProxyHandler, remote_host, remote_port
+        )
+        self.thread = threading.Thread(target=self.server.serve_forever)
+    def start(self):
+        self.thread.start()
+    def stop(self):
+        self.server.shutdown()
+        self.thread.join()
+    def get_totals(self):
+        return (self.server.total_client_to_server, self.server.total_server_to_client)
+    def reset_totals(self):
+        # Reset the counters to zero.
+        self.server.total_client_to_server = 0
+        self.server.total_server_to_client = 0
+
+###############################################################################
+# Interceptor to measure protobuf request/response sizes
 ###############################################################################
 class SizeMeasuringInterceptor(grpc.UnaryUnaryClientInterceptor):
     """
     Intercepts unary-unary RPC calls on the client side to measure the
-    serialized request/response sizes in bytes.
-    This version forcefully calls SerializeToString() on the response.
+    serialized request/response sizes in bytes (protobuf payload only).
     """
-
     def __init__(self):
-        self.measurements = []  # Will store each measurement as a dict
+        self.measurements = []  # Each measurement is stored as a dict
 
     def intercept_unary_unary(self, continuation, client_call_details, request):
-        # Serialize request
+        # Measure serialized request size.
         request_bytes = request.SerializeToString()
         req_size = len(request_bytes)
 
-        # Proceed with the RPC: Get the outcome (which is a _UnaryOutcome)
+        # Proceed with the RPC call.
         outcome = continuation(client_call_details, request)
-
-        # Extract the actual response using result() if available.
         try:
             response = outcome.result()
         except Exception as e:
-            print(f"[FORCED SerializeToString ERROR] Unable to extract result: {e}")
+            print(f"[ERROR] Unable to extract result: {e}")
             response = outcome
 
-        # Forcefully attempt to call SerializeToString() on the response
+        # Measure serialized response size.
         try:
             forced_bytes = response.SerializeToString()
             resp_size = len(forced_bytes)
         except Exception as e:
-            print(f"[FORCED SerializeToString ERROR] type(response)={type(response)}, error={e}")
+            print(f"[ERROR] type(response)={type(response)}, error={e}")
             resp_size = 0
 
-        # Determine which RPC method is being called
         method_name = client_call_details.method.split("/")[-1]
-
-        # Store res
         self.measurements.append({
             "method": method_name,
             "request_size": req_size,
@@ -70,111 +128,116 @@ class TestGrpcMessageSizes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """
-        Create an insecure channel with SizeMeasuringInterceptor attached.
+        Start the TCP proxy and create a gRPC channel (via the proxy) with
+        the SizeMeasuringInterceptor attached.
         """
-        cls.size_interceptor = SizeMeasuringInterceptor()
+        # Start TCP proxy: listen on port 50052 and forward to the actual server on 50051.
+        cls.tcp_proxy = TCPProxy("127.0.0.1", 50052, "127.0.0.1", 50051)
+        cls.tcp_proxy.start()
 
-        # Create channel with interceptor
+        # Set up client interceptor for protobuf measurements.
+        cls.size_interceptor = SizeMeasuringInterceptor()
+        # Create a gRPC channel to the proxy.
         cls.channel = grpc.intercept_channel(
-            grpc.insecure_channel(
-                "127.0.0.1:50051"
-            ),
+            grpc.insecure_channel("127.0.0.1:50052"),
             cls.size_interceptor
         )
         cls.stub = chat_service_pb2_grpc.ChatServiceStub(cls.channel)
+        # Prepare a list to store integration (full-wire) measurements per RPC.
+        cls.integration_measurements = []
 
-        # Optionally, do a ResetDB so we start with a clean database:
-        # (Uncomment if desired)
-        # cls.stub.ResetDB(chat_service_pb2.EmptyRequest(auth_token="ADMIN_TOKEN"))
+    def measure_integration_bytes(self, method_name, rpc_call):
+        """
+        Reset the TCP proxy counters, call the RPC, then record the bytes sent.
+        """
+        # Reset proxy counters.
+        self.__class__.tcp_proxy.reset_totals()
+        # Execute the RPC call.
+        result = rpc_call()
+        # Read the counters immediately after the call.
+        cs_bytes, sc_bytes = self.__class__.tcp_proxy.get_totals()
+        # Store per-RPC full byte measurements.
+        self.__class__.integration_measurements.append({
+            "method": method_name,
+            "client_to_server": cs_bytes,
+            "server_to_client": sc_bytes
+        })
+        return result
 
     def test_01_signup(self):
-        """(1) signup"""
         request = chat_service_pb2.SignupRequest(username="size_test_user", password="fake_hash")
-        response = self.stub.Signup(request)
+        response = self.measure_integration_bytes("Signup", lambda: self.stub.Signup(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_02_login(self):
-        """(2) login"""
         request = chat_service_pb2.LoginRequest(username="size_test_user", password="fake_hash")
-        response = self.stub.Login(request)
+        response = self.measure_integration_bytes("Login", lambda: self.stub.Login(request))
         self.assertTrue(response.status)
 
     def test_03_logout(self):
-        """(3) logout"""
         request = chat_service_pb2.EmptyRequest(auth_token="FAKE_TOKEN_123")
-        response = self.stub.Logout(request)
+        response = self.measure_integration_bytes("Logout", lambda: self.stub.Logout(request))
         self.assertTrue(response.status)
 
     def test_04_count_unread(self):
-        """(4) count_unread"""
         request = chat_service_pb2.CountUnreadRequest(auth_token="FAKE_TOKEN_123")
-        response = self.stub.CountUnread(request)
+        response = self.measure_integration_bytes("CountUnread", lambda: self.stub.CountUnread(request))
         self.assertTrue(response.status)
 
     def test_05_send_message(self):
-        """(5) send_message"""
         request = chat_service_pb2.SendMessageRequest(
             auth_token="FAKE_TOKEN_123",
             recipient="someone_else",
             content="Hello from gRPC size test!"
         )
-        response = self.stub.SendMessage(request)
+        response = self.measure_integration_bytes("SendMessage", lambda: self.stub.SendMessage(request))
         self.assertTrue(response.status)
 
     def test_06_list_messages(self):
-        """(6) list_messages (send_messages_to_client)"""
         request = chat_service_pb2.ListMessagesRequest(
             auth_token="FAKE_TOKEN_123",
             start=0,
             count=5
         )
-        response = self.stub.ListMessages(request)
+        response = self.measure_integration_bytes("ListMessages", lambda: self.stub.ListMessages(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_07_fetch_away_msgs(self):
-        """(7) fetch_away_msgs"""
         request = chat_service_pb2.FetchAwayMsgsRequest(auth_token="FAKE_TOKEN_123", limit=5)
-        response = self.stub.FetchAwayMsgs(request)
+        response = self.measure_integration_bytes("FetchAwayMsgs", lambda: self.stub.FetchAwayMsgs(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_08_list_accounts(self):
-        """(8) list_accounts"""
         request = chat_service_pb2.ListAccountsRequest(
             auth_token="FAKE_TOKEN_123",
             pattern="size_test",
             start=0,
             count=10
         )
-        response = self.stub.ListAccounts(request)
+        response = self.measure_integration_bytes("ListAccounts", lambda: self.stub.ListAccounts(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_09_delete_messages(self):
-        """(9) delete_messages"""
         request = chat_service_pb2.DeleteMessagesRequest(
             auth_token="FAKE_TOKEN_123",
             message_ids_to_delete=[123, 124]
         )
-        response = self.stub.DeleteMessages(request)
+        response = self.measure_integration_bytes("DeleteMessages", lambda: self.stub.DeleteMessages(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_10_delete_account(self):
-        """(10) delete_account"""
         request = chat_service_pb2.EmptyRequest(auth_token="FAKE_TOKEN_123")
-        response = self.stub.DeleteAccount(request)
+        response = self.measure_integration_bytes("DeleteAccount", lambda: self.stub.DeleteAccount(request))
         self.assertIn(response.status, ["ok", "error"])
 
     def test_11_reset_db(self):
-        """(11) reset_db"""
         request = chat_service_pb2.EmptyRequest(auth_token="FAKE_TOKEN_123")
-        response = self.stub.ResetDB(request)
+        response = self.measure_integration_bytes("ResetDB", lambda: self.stub.ResetDB(request))
         self.assertIn(response.status, ["ok", "error"])
 
     @classmethod
     def tearDownClass(cls):
-        """
-        Print out all measurement data after the tests finish.
-        """
-        print("\n=== gRPC Size Measurements (All 11 Methods) ===")
+        print("\n=== gRPC Protobuf Payload Measurements (All 11 Methods) ===")
         for record in cls.size_interceptor.measurements:
             print(
                 f"Method: {record['method']:<20} "
@@ -182,8 +245,23 @@ class TestGrpcMessageSizes(unittest.TestCase):
                 f"Response bytes: {record['response_size']:<4}"
             )
 
-        cls.channel.close()
+        print("\n=== Full Integration Test Bytes Breakdown (per RPC) ===")
+        for record in cls.integration_measurements:
+            print(
+                f"Method: {record['method']:<20} "
+                f"Client->Server: {record['client_to_server']:<4} "
+                f"Server->Client: {record['server_to_client']:<4}"
+            )
 
+        # Print overall totals from integration measurements.
+        total_cs = sum(r["client_to_server"] for r in cls.integration_measurements)
+        total_sc = sum(r["server_to_client"] for r in cls.integration_measurements)
+        print("\n=== Overall Full Integration Test Bytes (via TCP Proxy) ===")
+        print(f"Total client->server bytes: {total_cs}")
+        print(f"Total server->client bytes: {total_sc}")
+
+        cls.tcp_proxy.stop()
+        cls.channel.close()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
