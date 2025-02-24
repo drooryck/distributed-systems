@@ -47,6 +47,7 @@ messaging-app/
 │   │── chat.db                      # SQLite database for storing users and messages
 │   │── chat.db-journal              # SQLite journal file for database transactions
 │   │── test_suite_server/           # Test suite for server-side functionality
+│   │── test_int_grpc_sizes.py       # Integration test for gRPC message sizes
 │── Makefile                        # Automation for running server, client, and tests
 │── readme.md                       # Project documentation
 │── requirements.txt                 # Dependencies required for the project
