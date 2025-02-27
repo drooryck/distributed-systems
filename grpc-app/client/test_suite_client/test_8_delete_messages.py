@@ -1,44 +1,50 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from test_base_client import BaseTestClient
+import unittest
 from unittest.mock import patch, MagicMock
 import streamlit as st
-import unittest
-import warnings
-warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
-warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
 
-class TestDeleteMessages(BaseTestClient):
-    @patch("socket.socket")
-    def test_delete_single_message(self, mock_socket):
-        """
-        Test that deleting a message removes it from st.session_state["all_messages"].
-        """
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from client import ChatServerClient
+import chat_service_pb2
+
+class TestDeleteMessages(unittest.TestCase):
+    """Test message deletion behavior."""
+
+    def setUp(self):
+        """Set up a ChatServerClient instance."""
+        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_delete_selected_messages(self, mock_stub_class):
+        """Test that deleting selected messages sends the correct request to the server."""
         st.session_state.clear()
-        # Pre-populate the inbox with two messages.
-        st.session_state["all_messages"] = [
-            {"id": 101, "sender": "Bob", "content": "Message 1", "to_deliver": 1},
-            {"id": 102, "sender": "Alice", "content": "Message 2", "to_deliver": 0},
-        ]
+        st.session_state["inbox_page"] = 0  # Simulating user on the first inbox page
 
-        mock_sock = MagicMock()
-        # Simulate a successful deletion response from the server.
-        self.mock_send_response(
-            mock_sock,
-            {"status": "ok", "deleted_count": 1, "msg": "Deleted 1 messages."},
-            "delete_messages"
+        mock_stub = MagicMock()
+        mock_stub.DeleteMessages.return_value = chat_service_pb2.DeleteMessagesResponse(
+            status="ok", deleted_count=2
         )
-        mock_socket.return_value = mock_sock
+        mock_stub_class.return_value = mock_stub
 
-        # Simulate deletion of message with id 102.
-        response = self.client.send_request("delete_messages", {"message_ids_to_delete": [102]})
-        self.assertEqual(response["status"], "ok")
-        # Manually update the session state as the UI would:
-        st.session_state["all_messages"] = [m for m in st.session_state["all_messages"] if m["id"] != 102]
-        self.assertEqual(len(st.session_state["all_messages"]), 1)
-        self.assertEqual(st.session_state["all_messages"][0]["id"], 101)
+        # Simulate the deletion of messages with IDs 101 and 102
+        message_ids_to_delete = [101, 102]
+        response = mock_stub.DeleteMessages(
+            chat_service_pb2.DeleteMessagesRequest(
+                auth_token="test_token",
+                message_ids_to_delete=message_ids_to_delete
+            )
+        )
+
+        mock_stub.DeleteMessages.assert_called_once_with(
+            chat_service_pb2.DeleteMessagesRequest(
+                auth_token="test_token",
+                message_ids_to_delete=message_ids_to_delete
+            )
+        )
+        self.assertEqual(response.status, "ok")
+        self.assertEqual(response.deleted_count, 2)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

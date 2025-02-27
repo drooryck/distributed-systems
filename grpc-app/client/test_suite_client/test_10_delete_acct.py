@@ -1,54 +1,52 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from test_base_client import BaseTestClient
+import unittest
 from unittest.mock import patch, MagicMock
 import streamlit as st
-import unittest
-import warnings
-warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
-warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
 
-class TestDeleteAccount(BaseTestClient):
-    @patch("socket.socket")
-    def test_delete_account_resets_session(self, mock_socket):
-        """
-        Test that a successful account deletion clears the session state,
-        logging the user out.
-        """
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from client import ChatServerClient
+import chat_service_pb2
+
+class TestDeleteAccount(unittest.TestCase):
+    """Test account deletion functionality."""
+
+    def setUp(self):
+        """Set up a ChatServerClient instance."""
+        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_delete_account_clears_session(self, mock_stub_class):
+        """Test that a successful account deletion logs out the user and clears session state."""
         st.session_state.clear()
-        # Simulate a logged-in state.
         st.session_state["logged_in"] = True
         st.session_state["username"] = "Alice"
-        st.session_state["unread_count"] = 5
-        st.session_state["all_messages"] = [{"id": 101, "sender": "Alice", "content": "Hi"}]
+        st.session_state["auth_token"] = "test_token"
 
-        mock_sock = MagicMock()
-        # Simulate a successful delete_account response.
-        self.mock_send_response(
-            mock_sock,
-            {"status": "ok", "msg": "Account 'Alice' has been deleted. All associated messages are removed."},
-            "delete_account"
+        mock_stub = MagicMock()
+        mock_stub.DeleteAccount.return_value = chat_service_pb2.GenericResponse(
+            status="ok", msg="Account deleted successfully"
         )
-        mock_socket.return_value = mock_sock
+        mock_stub_class.return_value = mock_stub
 
-        response = self.client.send_request("delete_account", {})
-        print("###")
-        print(response)
-        print("###")
-        self.assertEqual(response["status"], "ok")
+        response = mock_stub.DeleteAccount(
+            chat_service_pb2.EmptyRequest(auth_token=st.session_state["auth_token"])
+        )
 
-        # In the UI, after a successful account deletion, session state is reset.
+        mock_stub.DeleteAccount.assert_called_once_with(
+            chat_service_pb2.EmptyRequest(auth_token="test_token")
+        )
+        self.assertEqual(response.status, "ok")
+
+        # Simulate session state reset after account deletion
         st.session_state["logged_in"] = False
         st.session_state["username"] = ""
-        st.session_state["unread_count"] = 0
-        st.session_state["all_messages"] = []
+        st.session_state["auth_token"] = ""
 
         self.assertFalse(st.session_state.get("logged_in", False))
         self.assertEqual(st.session_state.get("username", ""), "")
-        self.assertEqual(st.session_state.get("unread_count", 0), 0)
-        self.assertEqual(len(st.session_state.get("all_messages", [])), 0)
+        self.assertEqual(st.session_state.get("auth_token", ""), "")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

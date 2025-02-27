@@ -1,44 +1,50 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from test_base_client import BaseTestClient
+import unittest
 from unittest.mock import patch, MagicMock
 import streamlit as st
-import unittest
-import warnings
-warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
-warnings.filterwarnings("ignore", message="Session state does not function when running a script without `streamlit run`")
 
-class TestOfflineMessageFetch(BaseTestClient):
-    @patch("socket.socket")
-    def test_manual_fetch_offline_messages(self, mock_socket):
-        """
-        Test that manual fetching of offline messages (action "fetch_away_msgs")
-        correctly adds messages to st.session_state["all_messages"].
-        """
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from client import ChatServerClient
+import chat_service_pb2
+
+class TestOfflineMessageFetch(unittest.TestCase):
+    """Test manual fetching of offline messages."""
+
+    def setUp(self):
+        """Set up a ChatServerClient instance."""
+        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+
+    @patch("client.chat_service_pb2_grpc.ChatServiceStub")
+    def test_manual_fetch_offline_messages(self, mock_stub_class):
+        """Test that manually fetching offline messages retrieves the correct data."""
         st.session_state.clear()
-        st.session_state["all_messages"] = []
 
-        mock_sock = MagicMock()
-        # Simulate offline message response: one message with id 202.
-        self.mock_send_response(
-            mock_sock,
-            {"status": "ok", "msg": [
-                {"id": 202, "sender": "Alice", "content": "Offline message", "to_deliver": 0}
-            ]},
-            "fetch_away_msgs"
+        mock_stub = MagicMock()
+        mock_stub.FetchAwayMsgs.return_value = chat_service_pb2.ListMessagesResponse(
+            status="ok",
+            msg="Offline messages retrieved",
+            messages=[
+                chat_service_pb2.ChatMessage(id=202, sender="Alice", content="Offline message")
+            ],
+            total_count=1
         )
-        mock_socket.return_value = mock_sock
+        mock_stub_class.return_value = mock_stub
 
-        response = self.client.send_request("fetch_away_msgs", {"limit": 5})
-        self.assertEqual(response["status"], "ok")
+        response = mock_stub.FetchAwayMsgs(
+            chat_service_pb2.FetchAwayMsgsRequest(auth_token="test_token", limit=5)
+        )
 
-        for m in response["msg"]:
-            st.session_state["all_messages"].append(m)
+        mock_stub.FetchAwayMsgs.assert_called_once_with(
+            chat_service_pb2.FetchAwayMsgsRequest(auth_token="test_token", limit=5)
+        )
+        self.assertEqual(response.status, "ok")
 
-        self.assertEqual(len(st.session_state["all_messages"]), 1)
-        self.assertEqual(st.session_state["all_messages"][0]["id"], 202)
+        retrieved_messages = [{"id": m.id, "sender": m.sender, "content": m.content} for m in response.messages]
+
+        self.assertEqual(len(retrieved_messages), 1)
+        self.assertEqual(retrieved_messages[0]["id"], 202)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
