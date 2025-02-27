@@ -7,8 +7,6 @@ from test_4_pending_messages import TestPendingMessages
 from test_5_message_delivery_status import TestMessageDeliveryStatus
 from test_6_test_invalid_login import TestInvalidLogin
 from test_7_auth_required import TestAuthenticationRequired
-
-# New tests
 from test_8_logout_login import TestLogoutLogin
 from test_9_send_messsages_to_client import TestSendMessagesToClient
 from test_10_delete_single_message import TestDeleteSingleMessage
@@ -26,7 +24,6 @@ if __name__ == "__main__":
             unittest.defaultTestLoader.loadTestsFromTestCase(TestMessageDeliveryStatus),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestInvalidLogin),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestAuthenticationRequired),
-            # New tests
             unittest.defaultTestLoader.loadTestsFromTestCase(TestLogoutLogin),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestSendMessagesToClient),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteSingleMessage),

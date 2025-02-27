@@ -1,22 +1,27 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestSendMessage(BaseTest):
     def test_send_message(self):
         """Test that messages can be sent successfully"""
-        self.reset_database()
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
 
-        self.send_message("signup", {"username": "Bob", "password": "password"}, is_response=0)
-        self.receive_response()
+        stub = self.stub  # Get gRPC stub
 
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        # Sign up Alice and Bob
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="secret"))
+        stub.Signup(chat_service_pb2.SignupRequest(username="Bob", password="password"))
 
-        self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Hello Bob!"}, is_response=0)
-        response = self.receive_response()
-        # print()
-        print(response)
-        # print()
+        # Alice logs in
+        login_response = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="secret"))
+        self.assertEqual(login_response.status, "ok")
+        alice_token = login_response.auth_token
 
-        self.assertEqual(response["status"], "ok")
+        # Alice sends a message to Bob
+        send_response = stub.SendMessage(
+            chat_service_pb2.SendMessageRequest(auth_token=alice_token, recipient="Bob", content="Hello Bob!")
+        )
+        self.assertEqual(send_response.status, "ok")
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

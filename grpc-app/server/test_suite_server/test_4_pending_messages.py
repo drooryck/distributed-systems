@@ -1,29 +1,38 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestPendingMessages(BaseTest):
     def test_pending_messages(self):
         """Test that unread messages appear upon login"""
+
+        # Reset the database
         self.reset_database()
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
 
-        self.send_message("signup", {"username": "Bob", "password": "bobpass"}, is_response=0)
-        self.receive_response()
+        # Sign up Alice and Bob
+        self.signup("Alice", "secret")
+        self.signup("Bob", "bobpass")
 
-        self.send_message("login", {"username": "Bob", "password": "bobpass"}, is_response=0)
-        self.receive_response()
+        # Bob logs in and retrieves an auth token
+        bob_login = self.login("Bob", "bobpass")
+        self.assertEqual(bob_login.status, "ok")
+        bob_token = bob_login.auth_token  # Bob's auth token
 
-        self.send_message("send_message", {"sender": "Bob", "recipient": "Alice", "content": "Hey Alice!"}, is_response=0)
-        self.receive_response()
+        # Bob sends two messages to Alice
+        self.send_message(bob_token, "Alice", "Hey Alice!")
+        self.send_message(bob_token, "Alice", "Message 2!")
 
-        self.send_message("send_message", {"sender": "Bob", "recipient": "Alice", "content": "Message 2!"}, is_response=0)
-        self.receive_response()
+        # Bob logs out
+        logout_response = self.logout(bob_token)
+        self.assertEqual(logout_response.status, "ok")
 
-        self.send_message("logout", {}, is_response=0)
-        response = self.receive_response()
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
-        print(response)
-        
-        unread_count = response["unread_count"]
-        self.assertGreaterEqual(unread_count, 2)
+        # Alice logs in and retrieves an auth token
+        alice_login = self.login("Alice", "secret")
+        print(alice_login)  # Debug output
+        self.assertEqual(alice_login.status, "ok")
+
+        # Assert that Alice has at least 2 unread messages
+        self.assertGreaterEqual(alice_login.unread_count, 2)
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

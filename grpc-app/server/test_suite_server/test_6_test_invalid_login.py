@@ -1,94 +1,37 @@
+import unittest
+import chat_service_pb2
 from test_base import BaseTest
 
 class TestInvalidLogin(BaseTest):
     def test_login_wrong_password(self):
-        """
-        1. Reset DB
-        2. Signup a valid user
-        3. Attempt login with the wrong password
-        4. Expect an error response (not a disconnect)
-        """
-        self.reset_database()
-
-        # Sign up a valid user: "Alice"
-        self.send_message("signup", {"username": "Alice", "password": "correct_password"}, is_response=0)
-        self.receive_response()  # consume signup response
-
-        # Attempt login with the wrong password
-        self.send_message("login", {"username": "Alice", "password": "wrong_password"}, is_response=0)
-        response = self.receive_response()
-
-        # Validate
-        self.assertIsNotNone(response, "❌ Did not receive a response for wrong password!")
-        self.assertEqual(response["status"], "error", "❌ Test Failed: Logged in with wrong password!")
-        print("✅ test_login_wrong_password: Cannot log in with the wrong password.")
+        """Test logging in with an incorrect password"""
+        stub = self.stub
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="correct_password"))
+        response = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="wrong_password"))
+        self.assertEqual(response.status, "Incorrect password", "❌ Test Failed: Wrong error message for incorrect password!")
+        print("✅ test_login_wrong_password: Cannot log in with wrong password.")
 
     def test_login_missing_password(self):
-        """
-        1. Reset DB
-        2. Signup a valid user
-        3. Send login request missing 'password'
-        4. Expect the server to disconnect (receive_response() -> None).
-        """
-        self.reset_database()
-
-        # Sign up a valid user: "Alice"
-        self.send_message("signup", {"username": "Alice", "password": "correct_password"}, is_response=0)
-        self.receive_response()  # consume signup response
-
-        # Attempt login with missing password
-        self.send_message("login", {"username": "Alice"}, is_response=0)
-        response = self.receive_response()
-
-        # Validate
-        self.assertIsNone(response, "❌ Test Failed: Server did not disconnect on missing password.")
-        print("✅ test_login_missing_password: Server disconnects on missing password.")
+        """Test that login fails if the password is missing"""
+        stub = self.stub
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="correct_password"))
+        response = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password=""))
+        self.assertEqual(response.status, "Username and password are required", "❌ Test Failed: Wrong error message for missing password!")
+        print("✅ test_login_missing_password: Server rejects missing password.")
 
     def test_login_missing_username(self):
-        """
-        1. Reset DB
-        2. Signup a valid user
-        3. Send login request missing 'username'
-        4. Expect the server to disconnect (ConnectionResetError).
-        """
-        self.reset_database()
-
-        # Sign up a valid user: "Alice"
-        self.send_message("signup", {"username": "Alice", "password": "correct_password"}, is_response=0)
-        self.receive_response()  # Consume signup response
-
-        # Attempt login with missing username
-        self.send_message("login", {"password": "correct_password"}, is_response=0)
-
-        try:
-            response = self.receive_response()
-            self.fail("❌ Test Failed: Server did NOT disconnect on missing username.")  # This should never be reached
-        except ConnectionResetError:
-            print("✅ test_login_missing_username: Server disconnected as expected.")
+        """Test that login fails if the username is missing"""
+        stub = self.stub
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="correct_password"))
+        response = stub.Login(chat_service_pb2.LoginRequest(username="", password="correct_password"))
+        self.assertEqual(response.status, "Username and password are required", "❌ Test Failed: Wrong error message for missing username!")
+        print("✅ test_login_missing_username: Server rejects missing username.")
 
     def test_login_non_existent_user(self):
-        """
-        1. Reset DB
-        2. (Optional) You could sign up some other user, 
-           but we intentionally do not sign up 'GhostUser'
-        3. Attempt login with a non-existent user
-        4. Expect an error response (not a disconnect)
-        """
-        self.reset_database()
-
-        # (Optional) Sign up some other user if desired
-        # self.send_message("signup", {"username": "Bob", "password": "some_password"})
-        # self.receive_response()
-
-        # Attempt login with an unregistered username
-        self.send_message("login", {"username": "GhostUser", "password": "password123"}, is_response=0)
-        response = self.receive_response()
-
-        # Validate
-        self.assertIsNotNone(response, "❌ Did not receive a response for non-existent user!")
-        self.assertEqual(response["status"], "error", "❌ Test Failed: Logged in with a non-existent user!")
-        print("✅ test_login_non_existent_user: Cannot log in with an unregistered user.")
-
+        """Test logging in with a non-existent user"""
+        stub = self.stub
+        response = stub.Login(chat_service_pb2.LoginRequest(username="GhostUser", password="password123"))
+        self.assertEqual(response.status, "Username not found", "❌ Test Failed: Wrong error message for non-existent user!")
+        print("✅ test_login_non_existent_user: Cannot log in with unregistered user.")
 if __name__ == "__main__":
-    import unittest
     unittest.main()

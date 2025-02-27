@@ -1,36 +1,39 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestLogin(BaseTest):
     def test_valid_login(self):
         """Test a valid login"""
-        self.send_message("reset_db", {}, is_response=False)
-        response = self.receive_response()
+        stub = self.stub
 
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
+        # Sign up first
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="secret"))
 
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
-
-        print(response)
-        self.assertEqual(response["status"], "ok")
+        # Log in and get auth token
+        login_response = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="secret"))
+        self.assertEqual(login_response.status, "ok")
+        self.assertTrue(login_response.auth_token)
 
     def test_invalid_login_twice(self):
         """Test logging in with multiple accounts from the same connection"""
-        self.reset_database()
-        self.send_message("signup", {"username": "Bob", "password": "password"}, is_response=0)
-        self.receive_response()
+        stub = self.stub
 
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        # Sign up users
+        stub.Signup(chat_service_pb2.SignupRequest(username="Bob", password="password"))
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="secret"))
 
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
+        # Log in Alice first
+        login_response1 = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="secret"))
+        self.assertEqual(login_response1.status, "ok")
+        auth_token1 = login_response1.auth_token
 
-        self.send_message("login", {"username": "Bob", "password": "password"}, is_response=0)
-        response = self.receive_response()
-        print(response)
-        self.assertEqual(response["status"], "error")
+        # Log in Bob
+        login_response2 = stub.Login(chat_service_pb2.LoginRequest(username="Bob", password="password"))
+        self.assertEqual(login_response2.status, "ok")
+        auth_token2 = login_response2.auth_token
+
+        # Verify different tokens for different users
+        self.assertNotEqual(auth_token1, auth_token2)
 
 if __name__ == "__main__":
     import unittest

@@ -1,33 +1,52 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestMessageDeliveryStatus(BaseTest):
     def test_message_delivery(self):
         """Test that messages are marked as delivered once fetched"""
-        self.reset_database()
-        self.send_message("signup", {"username": "Frank", "password": "pass123"}, is_response=0)
-        self.receive_response()
 
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        stub = self.stub  # Get gRPC stub
 
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        # Sign up Frank and Alice
+        stub.Signup(chat_service_pb2.SignupRequest(username="Frank", password="pass123"))
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="secret"))
 
-        self.send_message("send_message", {"sender": "Alice", "recipient": "Frank", "content": "Hello Frank!"}, is_response=0)
-        self.receive_response()
+        # Alice logs in
+        alice_login = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="secret"))
+        self.assertEqual(alice_login.status, "ok")
+        alice_token = alice_login.auth_token
 
-        self.send_message("logout", {}, is_response=0)
-        self.receive_response()
-        
-        self.send_message("login", {"username": "Frank", "password": "pass123"}, is_response=0)
-        response = self.receive_response()
-        print(response)
-        print('###')
-        print('###')
+        # Alice sends a message to Frank
+        stub.SendMessage(
+            chat_service_pb2.SendMessageRequest(auth_token=alice_token, recipient="Frank", content="Hello Frank!")
+        )
 
-        self.send_message("fetch_away_msgs", {"num_messages": 5}, is_response=0)
+        # Alice logs out
+        stub.Logout(chat_service_pb2.EmptyRequest(auth_token=alice_token))
 
-        first_fetch = self.receive_response()
-        print(first_fetch)
-        
-        self.assertEqual(len(first_fetch["msg"]), 1)
+        # Frank logs in
+        frank_login = stub.Login(chat_service_pb2.LoginRequest(username="Frank", password="pass123"))
+        self.assertEqual(frank_login.status, "ok")
+        frank_token = frank_login.auth_token
+
+        # Step 1: Frank fetches messages (this marks them as delivered)
+        fetch_response = stub.FetchAwayMsgs(
+            chat_service_pb2.FetchAwayMsgsRequest(auth_token=frank_token, limit=5)
+        )
+        self.assertEqual(fetch_response.status, "ok")
+
+        # Step 2: Frank lists messages (now they should be marked as delivered)
+        list_response = stub.ListMessages(
+            chat_service_pb2.ListMessagesRequest(auth_token=frank_token, start=0, count=10)
+        )
+
+        # ✅ Verify that Frank has received exactly 1 message
+        self.assertEqual(len(list_response.messages), 1, "❌ Frank should see exactly 1 delivered message.")
+
+        # ✅ Verify the message content
+        self.assertEqual(list_response.messages[0].sender, "Alice", "❌ Message should be from Alice.")
+        self.assertEqual(list_response.messages[0].content, "Hello Frank!", "❌ Message content is incorrect.")
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

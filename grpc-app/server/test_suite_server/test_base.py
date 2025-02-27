@@ -1,44 +1,41 @@
-import socket
 import unittest
-
-import time
-
+import grpc
 import sys, os
-# Add the parent directory to sys.path to import 'protocol'
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from protocol.protocol import JSONProtocolHandler, CustomProtocolHandler, Message
+# Ensure the correct import path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 5555
-USE_CUSTOM_PROTOCOL = True  # Set True for binary protocol
+import chat_service_pb2
+import chat_service_pb2_grpc
+
+SERVER_ADDRESS = "localhost:50051"
 
 class BaseTest(unittest.TestCase):
-    """Base test class that resets the database before each test."""
-    time = time
+    """Base test class that resets the database before each test and manages gRPC connections."""
 
     def setUp(self):
-        """Initialize socket, protocol, and reset the database before tests."""
-        self.sock = socket.create_connection((SERVER_HOST, SERVER_PORT))
-        self.protocol = CustomProtocolHandler() if USE_CUSTOM_PROTOCOL else JSONProtocolHandler()
-        #self.reset_database()
+        """Initialize gRPC channel and stub before each test."""
+        self.channel = grpc.insecure_channel(SERVER_ADDRESS)
+        self.stub = chat_service_pb2_grpc.ChatServiceStub(self.channel)
+
+        # Ensure admin exists and reset the database
+        self.reset_database()
 
     def tearDown(self):
-        """Close the socket after each test."""
-        self.sock.close()
-
-    def send_message(self, msg_type, data, is_response):
-        """Send a structured message to the server."""
-        message = Message(msg_type, data or {})
-        self.protocol.send(self.sock, message, is_response)
-
-    def receive_response(self):
-        """Receive and parse a response from the server."""
-        response = self.protocol.receive(self.sock)
-        return response.data if response else None
+        """Close gRPC channel after each test."""
+        self.channel.close()
 
     def reset_database(self):
-        """Reset the database before each test using a temporary connection."""
-        with socket.create_connection((SERVER_HOST, SERVER_PORT)) as temp_sock:
-            self.protocol.send(temp_sock, Message("reset_db", {}), is_response=False)
-            temp_sock.recv(1024)  # Clear response buffer
+        """Ensure the admin user exists, logs in, and resets the database using gRPC."""
+        
+        # Step 1: Try signing up the admin user (ignore if already exists)
+        self.stub.Signup(chat_service_pb2.SignupRequest(username="admin", password="adminpass"))
+
+        # Step 2: Log in as admin and get the auth token
+        login_response = self.stub.Login(chat_service_pb2.LoginRequest(username="admin", password="adminpass"))
+        if login_response.status != "ok":
+            raise RuntimeError("Failed to log in as admin for database reset")
+
+        # Step 3: Send ResetDB request with auth token
+        reset_request = chat_service_pb2.EmptyRequest(auth_token=login_response.auth_token)
+        self.stub.ResetDB(reset_request)

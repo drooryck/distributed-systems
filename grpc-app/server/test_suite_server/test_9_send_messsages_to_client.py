@@ -1,3 +1,5 @@
+import unittest
+import chat_service_pb2
 from test_base import BaseTest
 
 class TestSendMessagesToClient(BaseTest):
@@ -6,57 +8,43 @@ class TestSendMessagesToClient(BaseTest):
         1. Alice & Bob sign up
         2. Alice sends a message to Bob
         3. Bob logs in & fetches messages -> message is now delivered
-        4. Bob calls send_messages_to_client to see delivered messages and messages while logged in
+        4. Bob calls ListMessages to see delivered messages
         5. Verify Bob receives the correct delivered messages
         """
-        self.reset_database()
+        stub = self.stub  # Get gRPC stub
 
-        # Sign up Alice
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
-
-        # Sign up Bob
-        self.send_message("signup", {"username": "Bob", "password": "bobpass"}, is_response=0)
-        self.receive_response()
+        # Sign up Alice and Bob
+        stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="secret"))
+        stub.Signup(chat_service_pb2.SignupRequest(username="Bob", password="bobpass"))
 
         # Login Alice
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        alice_login = stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="secret"))
+        self.assertEqual(alice_login.status, "ok", "❌ Alice should log in successfully")
+        alice_token = alice_login.auth_token
 
         # Alice sends a message to Bob
-        self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Hello Bob!"}, is_response=0)
-        send_response = self.receive_response()
-        self.assertEqual(send_response["status"], "ok", "❌ Sending message should succeed")
-    
+        send_response = stub.SendMessage(
+            chat_service_pb2.SendMessageRequest(auth_token=alice_token, recipient="Bob", content="Hello Bob!")
+        )
+        self.assertEqual(send_response.status, "ok", "❌ Sending message should succeed")
 
         # Logout Alice
-        self.send_message("logout", {}, is_response=0)
-        self.receive_response()
+        stub.Logout(chat_service_pb2.EmptyRequest(auth_token=alice_token))
 
         # Bob logs in
-        self.send_message("login", {"username": "Bob", "password": "bobpass"}, is_response=0)
-        login_response = self.receive_response()
-        self.assertEqual(login_response["status"], "ok", "❌ Bob should log in successfully")
+        bob_login = stub.Login(chat_service_pb2.LoginRequest(username="Bob", password="bobpass"))
+        self.assertEqual(bob_login.status, "ok", "❌ Bob should log in successfully")
+        bob_token = bob_login.auth_token
 
-        # Bob fetches messages -> they become delivered
-        self.send_message("fetch_away_msgs", {"num_messages": 5}, is_response=0)
-        fetch_response = self.receive_response()
-        
-        self.assertEqual(fetch_response["status"], "ok", "❌ fetch__away_msgs should succeed")
-        self.assertEqual(len(fetch_response["msg"]), 1, "❌ Bob should fetch exactly 1 new message")
+        # Bob fetches pending messages (this marks them as delivered)
+        fetch_response = stub.FetchAwayMsgs(chat_service_pb2.FetchAwayMsgsRequest(auth_token=bob_token, limit=5))
+        self.assertEqual(fetch_response.status, "ok", "❌ FetchAwayMsgs should succeed")
 
-        # Now Bob calls send_delivered_messages
-        self.send_message("send_messages_to_client", {}, is_response=0)
-        delivered_response = self.receive_response()
-        print(delivered_response)
-    
-        self.assertEqual(delivered_response["status"], "ok", "❌ send_messages_to_client should succeed")
-        delivered_msgs = delivered_response["msg"]
-        print(delivered_msgs)
-
-        self.assertEqual(len(delivered_msgs), 1, "❌ Bob should see exactly 1 delivered message")
-        self.assertEqual(delivered_msgs[0]["content"], "Hello Bob!", "❌ The delivered message content should match")
+        # Bob retrieves delivered messages via ListMessages
+        list_response = stub.ListMessages(chat_service_pb2.ListMessagesRequest(auth_token=bob_token, start=0, count=10))
+        self.assertEqual(list_response.status, "ok", "❌ ListMessages should succeed")
+        self.assertEqual(len(list_response.messages), 1, "❌ Bob should see exactly 1 delivered message")
+        self.assertEqual(list_response.messages[0].content, "Hello Bob!", "❌ The delivered message content should match")
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

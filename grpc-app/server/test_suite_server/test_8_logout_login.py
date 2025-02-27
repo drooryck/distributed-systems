@@ -1,4 +1,5 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestLogoutLogin(BaseTest):
     def test_logout_and_login(self):
@@ -8,32 +9,44 @@ class TestLogoutLogin(BaseTest):
         3. Attempt action while logged out (should fail)
         4. Log in again and confirm success
         """
-        self.reset_database()
+        stub = self.stub
 
         # Sign up Alice
-        self.send_message("signup", {"username": "Alice", "password": "secret"}, is_response=0)
-        self.receive_response()
+        signup_response = stub.Signup(
+            chat_service_pb2.SignupRequest(username="Alice", password="secret")
+        )
+        self.assertEqual(signup_response.status, "ok")
 
         # Login Alice
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
-        self.assertEqual(response["status"], "ok", "❌ Should log in successfully")
+        login_response = stub.Login(
+            chat_service_pb2.LoginRequest(username="Alice", password="secret")
+        )
+        self.assertEqual(login_response.status, "ok", "❌ Should log in successfully")
+        auth_token = login_response.auth_token
 
         # Logout
-        self.send_message("logout", {}, is_response=0)
-        response = self.receive_response()
-        self.assertEqual(response["status"], "ok", "❌ Logout should succeed")
+        logout_response = stub.Logout(
+            chat_service_pb2.EmptyRequest(auth_token=auth_token)
+        )
+        self.assertEqual(logout_response.status, "ok", "❌ Logout should succeed")
 
         # Attempt action while logged out
-        self.send_message("send_message", {"sender": "Alice", "recipient": "Bob", "content": "Test message"}, is_response=0)
-        response = self.receive_response()
-        self.assertEqual(response["status"], "error", "❌ Should not allow sending while logged out")
+        send_response = stub.SendMessage(
+            chat_service_pb2.SendMessageRequest(
+                auth_token=auth_token,  # Using old token
+                recipient="Bob",
+                content="Test message"
+            )
+        )
+        self.assertEqual(send_response.status, "error", 
+                        "❌ Should not allow sending while logged out")
 
         # Login again
-        self.send_message("login", {"username": "Alice", "password": "secret"}, is_response=0)
-        response = self.receive_response()
-        self.assertEqual(response["status"], "ok", "❌ Should log in again after logout")
-
+        login_response = stub.Login(
+            chat_service_pb2.LoginRequest(username="Alice", password="secret")
+        )
+        self.assertEqual(login_response.status, "ok", 
+                        "❌ Should log in again after logout")
 
 if __name__ == "__main__":
     import unittest

@@ -1,13 +1,19 @@
 from test_base import BaseTest
+import chat_service_pb2
 
 class TestSignup(BaseTest):
     def test_multiple_signups(self):
         """Test that multiple accounts can be created"""
-        self.reset_database()
-        self.send_message("signup", {"username": "Charlie", "password": "abc123"}, is_response=0)
-        self.receive_response()
+        stub = self.stub
 
-        self.send_message("signup", {"username": "Dave", "password": "xyz789"}, is_response=0)
-        response = self.receive_response()
-        print(response)
-        self.assertEqual(response["status"], "ok")
+        # Sign up Charlie
+        response1 = stub.Signup(chat_service_pb2.SignupRequest(username="Charlie", password="abc123"))
+        self.assertEqual(response1.status, "ok")
+
+        # Sign up Dave
+        response2 = stub.Signup(chat_service_pb2.SignupRequest(username="Dave", password="xyz789"))
+        self.assertEqual(response2.status, "ok")
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
