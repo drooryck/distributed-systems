@@ -1,0 +1,108 @@
+2025-02-27T17:39:24.992548 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=1
+2025-02-27T17:39:24.992607 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=1
+2025-02-27T17:39:24.992623 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=2
+2025-02-27T17:39:24.992676 | VM 2 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=1
+2025-02-27T17:39:24.992688 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=3
+2025-02-27T17:39:24.992702 | VM 1 (RECEIVE) | Sender=2 | QueueLen=0 | LogicalClock=2
+2025-02-27T17:39:24.992728 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=4
+2025-02-27T17:39:24.992740 | VM 1 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=3
+2025-02-27T17:39:24.992753 | VM 1 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=4
+2025-02-27T17:39:24.992763 | VM 0 (RECEIVE) | Sender=1 | QueueLen=0 | LogicalClock=5
+2025-02-27T17:39:24.992776 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=6
+2025-02-27T17:39:25.997309 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=7
+2025-02-27T17:39:25.997380 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=5
+2025-02-27T17:39:25.997430 | VM 2 (RECEIVE) | Sender=1 | QueueLen=0 | LogicalClock=5
+2025-02-27T17:39:25.997455 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=6
+2025-02-27T17:39:25.997479 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=8
+2025-02-27T17:39:25.997495 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=7
+2025-02-27T17:39:25.997513 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=9
+2025-02-27T17:39:25.997536 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=10
+2025-02-27T17:39:25.997566 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=11
+2025-02-27T17:39:25.997575 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=12
+2025-02-27T17:39:27.001007 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=12
+2025-02-27T17:39:27.001164 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=13
+2025-02-27T17:39:27.001216 | VM 2 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=6
+2025-02-27T17:39:27.001293 | VM 0 (RECEIVE) | Sender=2 | QueueLen=0 | LogicalClock=14
+2025-02-27T17:39:27.001323 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=14
+2025-02-27T17:39:27.001347 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=15
+2025-02-27T17:39:27.001373 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=15
+2025-02-27T17:39:27.001392 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=16
+2025-02-27T17:39:27.001415 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=17
+2025-02-27T17:39:27.001436 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=18
+2025-02-27T17:39:28.004051 | VM 2 (INTERNAL) | QueueLen=0 | LogicalClock=7
+2025-02-27T17:39:28.004211 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=17
+2025-02-27T17:39:28.004349 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=18
+2025-02-27T17:39:28.004434 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=19
+2025-02-27T17:39:28.004473 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=19
+2025-02-27T17:39:28.004583 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=20
+2025-02-27T17:39:28.004635 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=21
+2025-02-27T17:39:28.004677 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=22
+2025-02-27T17:39:28.004712 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=23
+2025-02-27T17:39:28.004751 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=24
+2025-02-27T17:39:28.004786 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=25
+2025-02-27T17:39:29.006291 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=21
+2025-02-27T17:39:29.006524 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=22
+2025-02-27T17:39:29.006581 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=23
+2025-02-27T17:39:29.009027 | VM 2 (RECEIVE) | Sender=0 | QueueLen=1 | LogicalClock=22
+2025-02-27T17:39:29.009085 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=26
+2025-02-27T17:39:29.009142 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=27
+2025-02-27T17:39:29.009161 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=28
+2025-02-27T17:39:29.009180 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=29
+2025-02-27T17:39:29.009194 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=30
+2025-02-27T17:39:29.009217 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=31
+2025-02-27T17:39:29.009234 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=32
+2025-02-27T17:39:30.009235 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=33
+2025-02-27T17:39:30.009474 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=34
+2025-02-27T17:39:30.009534 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=35
+2025-02-27T17:39:30.009610 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=36
+2025-02-27T17:39:30.009657 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=37
+2025-02-27T17:39:30.009694 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=38
+2025-02-27T17:39:30.009727 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=39
+2025-02-27T17:39:30.010064 | VM 1 (RECEIVE) | Sender=0 | QueueLen=2 | LogicalClock=27
+2025-02-27T17:39:30.010141 | VM 2 (RECEIVE) | Sender=0 | QueueLen=2 | LogicalClock=25
+2025-02-27T17:39:30.010226 | VM 1 (RECEIVE) | Sender=0 | QueueLen=1 | LogicalClock=32
+2025-02-27T17:39:30.010311 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=37
+2025-02-27T17:39:31.011127 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=40
+2025-02-27T17:39:31.011393 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=41
+2025-02-27T17:39:31.011460 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=42
+2025-02-27T17:39:31.011505 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=43
+2025-02-27T17:39:31.011540 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=44
+2025-02-27T17:39:31.011574 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=45
+2025-02-27T17:39:31.013687 | VM 2 (RECEIVE) | Sender=0 | QueueLen=1 | LogicalClock=33
+2025-02-27T17:39:31.015096 | VM 1 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=38
+2025-02-27T17:39:31.015171 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=39
+2025-02-27T17:39:31.015211 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=40
+2025-02-27T17:39:32.016181 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=46
+2025-02-27T17:39:32.016432 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=47
+2025-02-27T17:39:32.016487 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=48
+2025-02-27T17:39:32.016517 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=49
+2025-02-27T17:39:32.016539 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=50
+2025-02-27T17:39:32.016557 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=51
+2025-02-27T17:39:32.016577 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=52
+2025-02-27T17:39:32.016990 | VM 2 (RECEIVE) | Sender=0 | QueueLen=2 | LogicalClock=38
+2025-02-27T17:39:32.019680 | VM 1 (RECEIVE) | Sender=0 | QueueLen=1 | LogicalClock=48
+2025-02-27T17:39:32.019829 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=49
+2025-02-27T17:39:32.019892 | VM 1 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=50
+2025-02-27T17:39:33.019697 | VM 2 (RECEIVE) | Sender=1 | QueueLen=2 | LogicalClock=39
+2025-02-27T17:39:33.020620 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=53
+2025-02-27T17:39:33.020775 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=54
+2025-02-27T17:39:33.020830 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=55
+2025-02-27T17:39:33.020878 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=56
+2025-02-27T17:39:33.020915 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=57
+2025-02-27T17:39:33.020956 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=58
+2025-02-27T17:39:33.020991 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=59
+2025-02-27T17:39:33.021030 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=60
+2025-02-27T17:39:33.022270 | VM 1 (RECEIVE) | Sender=0 | QueueLen=2 | LogicalClock=57
+2025-02-27T17:39:33.022374 | VM 1 (RECEIVE) | Sender=0 | QueueLen=1 | LogicalClock=59
+2025-02-27T17:39:33.022571 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=61
+2025-02-27T17:39:34.022880 | VM 2 (RECEIVE) | Sender=0 | QueueLen=4 | LogicalClock=50
+2025-02-27T17:39:34.023002 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=61
+2025-02-27T17:39:34.023139 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=62
+2025-02-27T17:39:34.023210 | VM 0 (SEND) | Receiver=0 | QueueLen=0 | LogicalClock=63
+2025-02-27T17:39:34.023235 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=64
+2025-02-27T17:39:34.023250 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=65
+2025-02-27T17:39:34.023265 | VM 0 (INTERNAL) | QueueLen=0 | LogicalClock=66
+2025-02-27T17:39:34.023281 | VM 0 (SEND) | Receiver=1 | QueueLen=0 | LogicalClock=67
+2025-02-27T17:39:34.027203 | VM 1 (RECEIVE) | Sender=0 | QueueLen=0 | LogicalClock=64
+2025-02-27T17:39:34.027336 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=65
+2025-02-27T17:39:34.027367 | VM 1 (INTERNAL) | QueueLen=0 | LogicalClock=66
