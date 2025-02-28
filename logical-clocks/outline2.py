@@ -229,6 +229,46 @@ def main():
     vm2.join()
     
     print("All VMs have stopped. Logs should be in vm_0_log.txt, vm_1_log.txt, vm_2_log.txt.")
+    print("All VMs have stopped. Merging logs into global_log.txt...")
+
+    combined_entries = []
+
+    # For this example, we have three VMs, each with its own log file
+    for i in range(3):
+        filename = f"vm_{i}_log.txt"
+        with open(filename, "r") as f:
+            for line in f:
+                # Each line starts with an ISO8601 datetime, e.g.:
+                # 2025-02-27T12:34:56.789012 | VM 1 (SEND) | ...
+                # We can split on " | " or parse more rigorously.
+                
+                # Let's split up to the first ' | '
+                first_split = line.split(" | ", 1)
+                if len(first_split) < 2:
+                    # Not a well-formed log line; skip or handle error
+                    continue
+                datetime_str = first_split[0]  # e.g. 2025-02-27T12:34:56.789012
+                
+                try:
+                    dt = datetime.datetime.fromisoformat(datetime_str)
+                except ValueError:
+                    # If it fails, skip or handle error
+                    continue
+                
+                # Now store the parsed time and the entire original line
+                combined_entries.append((dt, line))
+    
+    # Sort combined entries by the parsed datetime
+    combined_entries.sort(key=lambda x: x[0])
+
+    # Write them out to a global log file
+    with open("global_log.txt", "w") as global_log:
+        for dt, original_line in combined_entries:
+            global_log.write(original_line)
+    
+    print("global_log.txt has been created and sorted by system time.")
+    
+    print("All VMs have stopped. Check vm_0_log.txt, vm_1_log.txt, vm_2_log.txt for logs.")
 
 if __name__ == "__main__":
     main()
