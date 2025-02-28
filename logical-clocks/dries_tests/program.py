@@ -128,13 +128,12 @@ class VirtualMachine(threading.Thread):
         # Later, this could be replaced with a gRPC call: 
         #     self.peers[to_peer].SendMessage( self.vm_id, self.logical_clock )
         self.peers[to_peer].msg_queue.put((self.vm_id, self.logical_clock))
-        
         # Log the send
         system_time = datetime.datetime.now().isoformat()
         current_queue_len = self.msg_queue.qsize()
         log_line = (
             f"{system_time} | VM {self.vm_id} (SEND) | "
-            f"Receiver={to_peer} | QueueLen={current_queue_len} | "
+            f"Receiver={self.peers[to_peer].vm_id} | QueueLen={current_queue_len} | "
             f"LogicalClock={self.logical_clock}\n"
         )
         self.log_file.write(log_line)
@@ -167,6 +166,7 @@ def main():
         # Peers are all other VMs except itself
         peers_list = [vm_threads[j] for j in range(3) if j != i]
         vm_threads[i].peers = peers_list
+        print(list(vm_threads[i].peers))
     
     print('logic')
     # Start the VM threads

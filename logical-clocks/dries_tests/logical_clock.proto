@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package logical_clock;
+
+service VirtualMachine {
+  rpc SendMessage(ClockMessage) returns (Ack) {}
+}
+
+message ClockMessage {
+  int32 sender_id = 1;
+  int32 logical_clock = 2;
+}
+
+message Ack {
+  string status = 1;
+}
