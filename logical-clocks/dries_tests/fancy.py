@@ -29,6 +29,24 @@ def analyze_logs(df, output_dir):
         df["system_time"] = pd.to_datetime(df["system_time"])
     df.sort_values(by="system_time", inplace=True)
 
+    # --- DRIFT CALCULATION AND PLOT (NEW) ---
+    # 1) Compute how many seconds have passed since the earliest event
+    start_time = df["system_time"].min()
+    df["real_time_seconds"] = (df["system_time"] - start_time).dt.total_seconds()
+
+    # 2) Define drift: difference between logical_clock and real_time_seconds
+    df["drift"] = df["logical_clock"] - df["real_time_seconds"]
+
+    # 3) Plot drift over time
+    plt.figure(figsize=(10,6))
+    sns.lineplot(data=df, x="system_time", y="drift", hue="vm_id", marker="o")
+    plt.title("Drift of Logical Clocks from System Time")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "drift_over_time.png"))
+    plt.close()
+    # --- END DRIFT CALCULATION ---
+
     # --- 1) Plot Logical Clock Over Time ---
     plt.figure(figsize=(10,6))
     sns.lineplot(data=df, x="system_time", y="logical_clock", hue="vm_id", marker="o")
@@ -71,6 +89,7 @@ def analyze_logs(df, output_dir):
     print(f"Plots saved to '{output_dir}/'.\n")
 
 
+
 class VirtualMachine(threading.Thread):
     def __init__(self, vm_id, peers, port):
         """
@@ -89,6 +108,7 @@ class VirtualMachine(threading.Thread):
         self.local_log = []  # store log events as dictionaries
         self.port = port
         self.stop_flag = False
+        self._grpc_server = None
 
     def run(self):
         """
@@ -178,7 +198,15 @@ class VirtualMachine(threading.Thread):
         server.add_insecure_port(f"[::]:{self.port}")
         server.start()
         print(f"VM {self.vm_id} server started on port {self.port}, clock_rate={self.clock_rate}")
+        self._grpc_server = server
         server.wait_for_termination()
+
+    def shutdown_server(self):
+        """
+        Stop the gRPC server.
+        """
+        if self._grpc_server is not None:
+            self._grpc_server.stop(None)
 
     def SendMessage(self, request, context):
         """
@@ -229,6 +257,7 @@ def single_run(duration, run_index, output_dir):
     # Stop them
     for vm in vms:
         vm.stop_flag = True
+        vm.shutdown_server()
     
     # Join them
     for vm in vms:
