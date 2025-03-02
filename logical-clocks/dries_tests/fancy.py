@@ -86,6 +86,34 @@ def analyze_logs(df, output_dir):
     plt.savefig(os.path.join(output_dir, "event_type_distribution_by_vm.png"))
     plt.close()
 
+    def plot_relative_drift(df, output_dir):
+        """
+        Plot relative drift over system time, defined as the difference between
+        the maximum and minimum logical clock values among all VMs in each time bin.
+        """
+        # Ensure system_time is a datetime and sorted
+        df["system_time"] = pd.to_datetime(df["system_time"])
+        df = df.sort_values("system_time")
+        
+        # Create time bins (rounded down to the nearest second)
+        df["time_bin"] = df["system_time"].dt.floor("S")
+        
+        # For each time bin, compute the maximum and minimum logical clock values
+        drift_df = df.groupby("time_bin")["logical_clock"].agg(["max", "min"]).reset_index()
+        drift_df["drift"] = drift_df["max"] - drift_df["min"]
+        
+        # Plot the relative drift over time
+        plt.figure(figsize=(10,6))
+        sns.lineplot(data=drift_df, x="time_bin", y="drift", marker="o")
+        plt.title("Relative Drift Over Time\n(Difference between max and min logical clocks)")
+        plt.xlabel("System Time")
+        plt.ylabel("Drift (max - min)")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "relative_drift_over_time.png"))
+        plt.close()
+
+
     print(f"Plots saved to '{output_dir}/'.\n")
 
 
