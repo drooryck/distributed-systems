@@ -22,19 +22,20 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
+from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13logical_clock.proto\x12\rlogical_clock\"8\n\x0c\x43lockMessage\x12\x11\n\tsender_id\x18\x01 \x01(\x05\x12\x15\n\rlogical_clock\x18\x02 \x01(\x05\"\x15\n\x03\x41\x63k\x12\x0e\n\x06status\x18\x01 \x01(\t2R\n\x0eVirtualMachine\x12@\n\x0bSendMessage\x12\x1b.logical_clock.ClockMessage\x1a\x12.logical_clock.Ack\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13logical_clock.proto\x12\rlogical_clock\x1a\x1bgoogle/protobuf/empty.proto\"8\n\x0c\x43lockMessage\x12\x11\n\tsender_id\x18\x01 \x01(\x05\x12\x15\n\rlogical_clock\x18\x02 \x01(\x05\"\x15\n\x03\x41\x63k\x12\x0e\n\x06status\x18\x01 \x01(\t2\x86\x01\n\x0eVirtualMachine\x12>\n\x0bSendMessage\x12\x1b.logical_clock.ClockMessage\x1a\x12.logical_clock.Ack\x12\x34\n\x06StopVM\x12\x16.google.protobuf.Empty\x1a\x12.logical_clock.Ackb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'logical_clock_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_CLOCKMESSAGE']._serialized_start=38
-  _globals['_CLOCKMESSAGE']._serialized_end=94
-  _globals['_ACK']._serialized_start=96
-  _globals['_ACK']._serialized_end=117
-  _globals['_VIRTUALMACHINE']._serialized_start=119
-  _globals['_VIRTUALMACHINE']._serialized_end=201
+  _globals['_CLOCKMESSAGE']._serialized_start=67
+  _globals['_CLOCKMESSAGE']._serialized_end=123
+  _globals['_ACK']._serialized_start=125
+  _globals['_ACK']._serialized_end=146
+  _globals['_VIRTUALMACHINE']._serialized_start=149
+  _globals['_VIRTUALMACHINE']._serialized_end=283
 # @@protoc_insertion_point(module_scope)

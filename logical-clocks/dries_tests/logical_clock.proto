@@ -2,15 +2,18 @@ syntax = "proto3";
 
 package logical_clock;
 
+import "google/protobuf/empty.proto";
+
 service VirtualMachine {
-  rpc SendMessage(ClockMessage) returns (Ack) {}
+    rpc SendMessage(ClockMessage) returns (Ack);
+    rpc StopVM(google.protobuf.Empty) returns (Ack);
 }
 
 message ClockMessage {
-  int32 sender_id = 1;
-  int32 logical_clock = 2;
+    int32 sender_id = 1;
+    int32 logical_clock = 2;
 }
 
 message Ack {
-  string status = 1;
+    string status = 1;
 }

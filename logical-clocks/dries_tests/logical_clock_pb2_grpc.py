@@ -3,6 +3,7 @@
 import grpc
 import warnings
 
+from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 import logical_clock_pb2 as logical__clock__pb2
 
 GRPC_GENERATED_VERSION = '1.70.0'
@@ -39,6 +40,11 @@ class VirtualMachineStub(object):
                 request_serializer=logical__clock__pb2.ClockMessage.SerializeToString,
                 response_deserializer=logical__clock__pb2.Ack.FromString,
                 _registered_method=True)
+        self.StopVM = channel.unary_unary(
+                '/logical_clock.VirtualMachine/StopVM',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=logical__clock__pb2.Ack.FromString,
+                _registered_method=True)
 
 
 class VirtualMachineServicer(object):
@@ -50,12 +56,23 @@ class VirtualMachineServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StopVM(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_VirtualMachineServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'SendMessage': grpc.unary_unary_rpc_method_handler(
                     servicer.SendMessage,
                     request_deserializer=logical__clock__pb2.ClockMessage.FromString,
+                    response_serializer=logical__clock__pb2.Ack.SerializeToString,
+            ),
+            'StopVM': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopVM,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=logical__clock__pb2.Ack.SerializeToString,
             ),
     }
@@ -85,6 +102,33 @@ class VirtualMachine(object):
             target,
             '/logical_clock.VirtualMachine/SendMessage',
             logical__clock__pb2.ClockMessage.SerializeToString,
+            logical__clock__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopVM(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/logical_clock.VirtualMachine/StopVM',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             logical__clock__pb2.Ack.FromString,
             options,
             channel_credentials,
