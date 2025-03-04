@@ -2,5 +2,5 @@ Run Index: 4
 Duration: 60 seconds
 Clock Rates:
   VM 0 -> clock_rate=4
-  VM 1 -> clock_rate=4
-  VM 2 -> clock_rate=3
+  VM 1 -> clock_rate=1
+  VM 2 -> clock_rate=2
