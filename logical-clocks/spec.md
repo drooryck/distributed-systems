@@ -6,7 +6,7 @@
 │── dries_tests/                        
 │   │── results/
 │   │   │── 10seconds/
-│   │   │   │── 1/
+│   │   │   │── run1/
 │   │   │   │   ├── vm0_events.csv
 │   │   │   │   ├── vm1_events.csv
 │   │   │   │   ├── vm2_events.csv
@@ -16,6 +16,10 @@
 │   │   │   │   ├── queue_length_over_time.png
 │   │   │   │   ├── relative_drift_over_time.png
 │   │   │   │   └── run_info.txt
+│   │   │   │── run2/
+│   │   │   │── run3/
+│   │   │   │── run4/
+│   │   │   │── run5/
 │   │   │── 60seconds/
 │   │   │   ├── run1/
 │   │   │   ├── run2/
@@ -34,10 +38,12 @@
 │   │       ├── run3/
 │   │       ├── run4/
 │   │       └── run5/
-│   └── fancy.py
+|   |-- scale_model
+|   |-- tests
 │   └── spec.md
+|   
 └── ...
-```
+
 
 Each subfolder under `results/` corresponds to a distinct experimental setting and duration:
 
@@ -97,5 +103,8 @@ Each folder includes **5 runs** to gather multiple data points.
    - **Logical Clock**: On ``INTERNAL`` or ``SEND``, increments by 1; on ``RECEIVE``, sets ``L = max(L, sender_clock) + 1``.
    - **Queue**: Received messages are queued and processed at the VM’s clock rate.
    - **Analysis**: The final CSV is read into **pandas** to generate plots (logical clock over time, queue length, event distribution, drift, etc.).
+
+4. Other stuff
+We added a nice test suite for making sure that the messages we sent are actually logged correctly for a single process.
 
 This setup meets the assignment’s requirement of modeling multiple asynchronous VMs on one machine, each as a separate process that communicates via sockets (gRPC). The logs and plots in each ``results/`` subfolder illustrate how clock drift, event distribution, and queue behavior evolve under various experimental conditions.

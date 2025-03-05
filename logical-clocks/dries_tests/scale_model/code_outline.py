@@ -5,6 +5,11 @@ import time
 import datetime
 import asyncio
 
+###
+### this file should just give the reader a better idea of how the code in multiprocessing.py works.
+### it probably doesn't work anymore.
+###
+
 # For gRPC since it uses ThreadPoolExecutor
 from concurrent import futures
 

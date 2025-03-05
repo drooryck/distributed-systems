@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Proto-generated imports
-import logical_clock_pb2
-import logical_clock_pb2_grpc
+from . import logical_clock_pb2
+from . import logical_clock_pb2_grpc
 
 from google.protobuf.empty_pb2 import Empty
 

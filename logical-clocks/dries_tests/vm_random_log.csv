@@ -1,0 +1,3 @@
+system_time,vm_id,event_type,logical_clock,sender_id,receiver_id
+2025-03-04T23:36:59.543877,0,SEND,1,,3.0
+2025-03-04T23:37:00.546885,0,INTERNAL,2,,
