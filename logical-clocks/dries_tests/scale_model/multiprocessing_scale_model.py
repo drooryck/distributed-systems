@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Proto-generated imports
-from . import logical_clock_pb2
-from . import logical_clock_pb2_grpc
+import logical_clock_pb2
+import logical_clock_pb2_grpc
 
 from google.protobuf.empty_pb2 import Empty
 
@@ -25,65 +25,50 @@ def analyze_logs(df, output_dir):
     """
     Analyze and plot event data from the simulation, saving plots in output_dir.
     """
-
     os.makedirs(output_dir, exist_ok=True)
 
-    # Convert system_time to datetime for proper sorting
-    if not pd.api.types.is_datetime64_any_dtype(df["system_time"]):
-        df["system_time"] = pd.to_datetime(df["system_time"])
+    # Convert system_time to datetime and sort
+    df["system_time"] = pd.to_datetime(df["system_time"])
     df.sort_values(by="system_time", inplace=True)
 
-    # --- 1) Plot Logical Clock Over Time ---
-    plt.figure(figsize=(10,6))
-    sns.lineplot(data=df, x="system_time", y="logical_clock", hue="vm_id", marker="o")
-    plt.title("Logical Clock over Time (by VM)")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "logical_clock_over_time.png"))
-    plt.close()
+    # Use the default Seaborn color palette
+    sns.set_palette("muted")
 
-    # --- 2) Plot Queue Length Over Time ---
-    plt.figure(figsize=(10,6))
-    sns.lineplot(data=df, x="system_time", y="queue_len", hue="vm_id", marker="o")
-    plt.title("Queue Length over Time (by VM)")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "queue_length_over_time.png"))
-    plt.close()
+    # Line plots for Logical Clock & Queue Length
+    for metric, title, filename in [
+        ("logical_clock", "Logical Clock over Time (by VM)", "logical_clock_over_time.png"),
+        ("queue_len", "Queue Length over Time (by VM)", "queue_length_over_time.png")
+    ]:
+        plt.figure(figsize=(10,6))
+        sns.lineplot(data=df, x="system_time", y=metric, hue="vm_id", marker="o")
+        plt.title(title)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, filename))
+        plt.close()
 
-    # --- 3) Count of Event Types per VM ---
-    event_counts = df.groupby(["vm_id", "event_type"]).size().reset_index(name="count")
-    print("\nEvent counts by VM and Event Type:")
-    print(event_counts)
+    # Event type counts
+    event_counts = df.groupby(["vm_id", "event_type"]).size().unstack(fill_value=0)
 
-    # Plot: event_type on x-axis, hue by vm_id
-    plt.figure(figsize=(8,5))
-    sns.countplot(data=df, x="event_type", hue="vm_id")
-    plt.title("Distribution of Event Types by VM (Default Grouping)")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "event_type_distribution.png"))
-    plt.close()
+    # Stacked Bar Charts
+    for index, xlabel, filename in [
+        ("event_type", "Event Type", "event_type_distribution.png"),
+        ("vm_id", "VM ID", "event_type_distribution_by_vm.png")
+    ]:
+        event_counts.plot(kind="bar", stacked=True, figsize=(8,5))
+        plt.title(f"Distribution of Event Types (Stacked by {xlabel})")
+        plt.xlabel(xlabel)
+        plt.ylabel("Count")
+        plt.xticks(rotation=45 if index == "event_type" else 0)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, filename))
+        plt.close()
 
-    # --- 4) Another distribution: group by vm_id on x-axis, hue by event_type
-    plt.figure(figsize=(8,5))
-    sns.countplot(data=df, x="vm_id", hue="event_type")
-    plt.title("Distribution of Event Types by VM (Grouped by VM)")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "event_type_distribution_by_vm.png"))
-    plt.close()
-
-    # Ensure system_time is a datetime and sorted
-    df["system_time"] = pd.to_datetime(df["system_time"])
-    df = df.sort_values("system_time")
-    
-    # Create time bins (rounded down to the nearest second)
+    # Compute and plot drift over time
     df["time_bin"] = df["system_time"].dt.floor("S")
-    
-    # For each time bin, compute the maximum and minimum logical clock values
     drift_df = df.groupby("time_bin")["logical_clock"].agg(["max", "min"]).reset_index()
     drift_df["drift"] = drift_df["max"] - drift_df["min"]
-    
-    # Plot the relative drift over time
+
     plt.figure(figsize=(10,6))
     sns.lineplot(data=drift_df, x="time_bin", y="drift", marker="o")
     plt.title("Relative Drift Over Time\n(Difference between max and min logical clocks)")
@@ -122,22 +107,25 @@ class VirtualMachine(logical_clock_pb2_grpc.VirtualMachineServicer):
 
     def main_loop(self):
         """
-        Executes self.clock_rate instructions per second until stop_flag is set.
+        Executes self.clock_rate instructions per second until stop_flag is set,
+        spaced out so each cycle occurs every 1/self.clock_rate seconds.
         """
         while not self.stop_flag:
-            start_time = time.time()
-            
             for _ in range(self.clock_rate):
                 if self.stop_flag:
                     break
+                cycle_start = time.time()
+
                 self.one_cycle()
 
-            elapsed = time.time() - start_time
-            to_sleep = 1.0 - elapsed
-            if to_sleep > 0:
-                time.sleep(to_sleep)
+                # We'll sleep whatever remains of (1.0 / clock_rate)
+                fraction = 1.0 / self.clock_rate
+                elapsed = time.time() - cycle_start
+                to_sleep = fraction - elapsed
+                if to_sleep > 0:
+                    time.sleep(to_sleep)
 
-        # When stop_flag is set, write all local logs to file
+        # Final step: write out the logs
         self.write_logs_to_file()
 
     def one_cycle(self):

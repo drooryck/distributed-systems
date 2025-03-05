@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from scale_model.multiprocess_test_model import single_run
+from dries_tests.scale_model.multiprocess_test_model import single_run
 
 @pytest.mark.parametrize("duration", [2])
 def test_send_both(duration):

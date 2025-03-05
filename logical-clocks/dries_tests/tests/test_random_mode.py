@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import random
-from scale_model.multiprocess_test_model import single_run
+from dries_tests.scale_model.multiprocess_test_model import single_run
 
 @pytest.mark.parametrize("seed", [42, 123])
 def test_random_mode(seed):

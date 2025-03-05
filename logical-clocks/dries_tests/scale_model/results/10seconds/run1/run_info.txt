@@ -1,0 +1,6 @@
+Run Index: 1
+Duration: 10 seconds
+Clock Rates:
+  VM 0 -> clock_rate=6
+  VM 1 -> clock_rate=5
+  VM 2 -> clock_rate=4

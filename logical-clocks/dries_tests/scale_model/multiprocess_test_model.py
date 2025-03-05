@@ -35,28 +35,30 @@ class SingleVM:
 
     def run_loop(self, duration):
         """
-        Runs for 'duration' seconds, generating events according to self.mode.
+        Executes self.clock_rate instructions per second for 'duration' seconds.
+        Ensures that each cycle occurs evenly spaced over 1 second.
         """
         start_time = time.time()
-
+        
         while (time.time() - start_time) < duration and not self.stop_flag:
-            cycle_start = time.time()
-
-            # Perform up to self.clock_rate instructions in 1 second
             for _ in range(self.clock_rate):
                 if (time.time() - start_time) >= duration:
                     break
                 if self.stop_flag:
                     break
-
+                
+                cycle_start = time.time()
                 self.one_cycle()
 
-            elapsed = time.time() - cycle_start
-            to_sleep = 1.0 - elapsed
-            if to_sleep > 0:
-                time.sleep(to_sleep)
+                # Sleep to evenly distribute cycles over a second
+                fraction = 1.0 / self.clock_rate
+                elapsed = time.time() - cycle_start
+                to_sleep = fraction - elapsed
+                if to_sleep > 0:
+                    time.sleep(to_sleep)
 
         self.write_logs()
+
 
     def one_cycle(self):
         """
