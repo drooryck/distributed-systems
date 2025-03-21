@@ -97,7 +97,6 @@ message SendMessageRequest {
   string auth_token = 1;
   string recipient = 2;
   string content   = 3; // the server knows via the auth token who the sender is
-
 }
 
 // for "list_messages"
@@ -125,6 +124,15 @@ message ListAccountsRequest {
 message DeleteMessagesRequest {
   string auth_token = 1;
   repeated int32 message_ids_to_delete = 2;
+}
+
+// NEW: Replication Request message
+message ReplicationRequest {
+  string op_type = 1;      // Operation type (e.g., "INSERT_MESSAGE", "DELETE_ACCOUNT", etc.)
+  string sender = 2;       // Username or sender field
+  string recipient = 3;    // Recipient field (if applicable)
+  string content = 4;      // Message content or other operation data (e.g., password hash)
+  repeated int32 message_ids = 5; // For operations like deleting messages
 }
 
 // ========== SERVICE DEFINITION ==========
@@ -162,4 +170,8 @@ service ChatService {
 
   // 11) reset_db
   rpc ResetDB(EmptyRequest) returns (GenericResponse);
+
+  // 12) replicate
+  // Replication RPC method - for the primary to replicate operations to backups.
+  rpc Replicate(ReplicationRequest) returns (GenericResponse);
 }
