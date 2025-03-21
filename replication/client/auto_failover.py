@@ -4,9 +4,9 @@ from streamlit_autorefresh import st_autorefresh
 import hashlib
 import argparse
 import sys, os
+import grpc
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import grpc
 import chat_service_pb2
 import chat_service_pb2_grpc
 
@@ -15,39 +15,118 @@ import chat_service_pb2_grpc
 ###############################################################################
 class ChatServerClient:
     """
-    Encapsulates server connection behavior using a custom or JSON protocol.
-    All client→server messages are requests (is_response=False);
-    the server replies with is_response=True.
-
-    MANUAL FAILOVER version:
-      - We store multiple server addresses, but only connect to ONE at a time.
-      - The user can pick which address is the "active" server in the Streamlit UI.
+    Encapsulates server connection behavior for an AUTOMATIC FAILOVER version.
+    
+    - We store multiple server addresses.
+    - On each request, we try the 'current' server first. If it fails, we iterate
+      through the list to find a working server. We then set that as 'current'.
+    - This approach can tolerate up to 2 servers going down, as long as at least
+      one server remains functional.
     """
 
     def __init__(self, server_addresses):
         """
         server_addresses: list of possible gRPC addresses (e.g. ["127.0.0.1:50051", "127.0.0.1:50052"]).
-        We will default to the first one, but user can switch manually in the UI.
+        We'll attempt them in order to find a working server.
         """
         self.server_addresses = server_addresses
-        # Start with the first address, or none if empty
-        self.active_address = server_addresses[0] if server_addresses else None
+        self.current_idx = 0  # start with the first address
         self.stub = None
-        self.connect_stub()
+        if not server_addresses:
+            raise ValueError("No server addresses provided.")
+        self._connect_stub(self.server_addresses[self.current_idx])
 
-    def connect_stub(self):
-        """(Re)connects the gRPC stub for the currently active address."""
-        if not self.active_address:
-            st.warning("No active server address set!")
-            self.stub = None
-            return
-        channel = grpc.insecure_channel(self.active_address)
+    def _connect_stub(self, address):
+        """(Re)connect to the given address and store the stub."""
+        channel = grpc.insecure_channel(address)
         self.stub = chat_service_pb2_grpc.ChatServiceStub(channel)
 
-    def set_active_address(self, addr):
-        """Switch to a new server address, and re-create the stub."""
-        self.active_address = addr
-        self.connect_stub()
+    def _try_stub_call(self, func, *args, **kwargs):
+        """
+        Attempt the given stub function. If it fails, we move to the next server.
+        Returns the response or None if all servers fail.
+        """
+        num_servers = len(self.server_addresses)
+        attempts = 0
+
+        while attempts < num_servers:
+            current_address = self.server_addresses[self.current_idx]
+            try:
+                # Make the RPC call
+                return func(*args, **kwargs)
+            except grpc.RpcError as rpc_err:
+                st.warning(f"Server {current_address} failed with {rpc_err}. Trying next server.")
+            except Exception as e:
+                st.warning(f"Server {current_address} error: {e}. Trying next server.")
+            
+            # Move to the next server
+            self.current_idx = (self.current_idx + 1) % num_servers
+            self._connect_stub(self.server_addresses[self.current_idx])
+            attempts += 1
+
+        # If we exhaust the loop, all servers failed
+        st.error("All servers appear to be down. Could not complete request.")
+        return None
+
+    # We wrap each RPC method to automatically fail over
+    def signup(self, username, password):
+        req = chat_service_pb2.SignupRequest(username=username, password=password)
+        return self._try_stub_call(self.stub.Signup, req)
+
+    def login(self, username, password):
+        req = chat_service_pb2.LoginRequest(username=username, password=password)
+        return self._try_stub_call(self.stub.Login, req)
+
+    def logout(self, auth_token):
+        req = chat_service_pb2.EmptyRequest(auth_token=auth_token)
+        return self._try_stub_call(self.stub.Logout, req)
+
+    def count_unread(self, auth_token):
+        req = chat_service_pb2.CountUnreadRequest(auth_token=auth_token)
+        return self._try_stub_call(self.stub.CountUnread, req)
+
+    def send_message(self, auth_token, recipient, content):
+        req = chat_service_pb2.SendMessageRequest(
+            auth_token=auth_token,
+            recipient=recipient,
+            content=content
+        )
+        return self._try_stub_call(self.stub.SendMessage, req)
+
+    def list_messages(self, auth_token, start, count):
+        req = chat_service_pb2.ListMessagesRequest(
+            auth_token=auth_token,
+            start=start,
+            count=count
+        )
+        return self._try_stub_call(self.stub.ListMessages, req)
+
+    def fetch_away_msgs(self, auth_token, limit):
+        req = chat_service_pb2.FetchAwayMsgsRequest(
+            auth_token=auth_token,
+            limit=limit
+        )
+        return self._try_stub_call(self.stub.FetchAwayMsgs, req)
+
+    def list_accounts(self, auth_token, pattern, start, count):
+        req = chat_service_pb2.ListAccountsRequest(
+            auth_token=auth_token,
+            pattern=pattern,
+            start=start,
+            count=count
+        )
+        return self._try_stub_call(self.stub.ListAccounts, req)
+
+    def delete_messages(self, auth_token, message_ids):
+        req = chat_service_pb2.DeleteMessagesRequest(
+            auth_token=auth_token,
+            message_ids_to_delete=message_ids
+        )
+        return self._try_stub_call(self.stub.DeleteMessages, req)
+
+    def delete_account(self, auth_token):
+        req = chat_service_pb2.EmptyRequest(auth_token=auth_token)
+        return self._try_stub_call(self.stub.DeleteAccount, req)
 
     @staticmethod
     def hash_password(password):
@@ -58,19 +137,15 @@ class ChatServerClient:
 ###############################################################################
 class StreamlitChatApp:
     """
-    Main application class for our Streamlit-based Chat App, 
-    with MANUAL FAILOVER to survive up to 2 crashes (the user picks which server is up).
-    
-    Data in st.session_state includes:
-      - logged_in, username, inbox_page, auth_token, account_page, active_server
+    Main application class for our Streamlit-based Chat App.
+    AUTOMATIC FAILOVER version: each request tries the current server; if it fails,
+    we automatically switch to the next server in the list.
     """
 
     def __init__(self, server_addresses):
         self.server_addresses = server_addresses
+        self.client = ChatServerClient(server_addresses)
         self._init_session_state()
-        # Build a ChatServerClient that starts on whichever address is in session_state.active_server
-        self.client = None
-        self._ensure_client()
 
     def _init_session_state(self):
         if "logged_in" not in st.session_state:
@@ -83,22 +158,6 @@ class StreamlitChatApp:
             st.session_state.auth_token = ""
         if "account_page" not in st.session_state:
             st.session_state.account_page = 0
-        # For manual failover, store which server is currently active
-        if "active_server" not in st.session_state:
-            # Default to the first server in the list
-            st.session_state.active_server = self.server_addresses[0] if self.server_addresses else None
-
-    def _ensure_client(self):
-        """Ensure self.client is set up with the correct active address from session_state."""
-        if not st.session_state.active_server:
-            st.warning("No server addresses provided or no active_server set.")
-            return
-        if not self.client:
-            # Build a new ChatServerClient
-            self.client = ChatServerClient(self.server_addresses)
-        # If the stored active_server differs from the client's active_address, update it:
-        if self.client.active_address != st.session_state.active_server:
-            self.client.set_active_address(st.session_state.active_server)
 
     def apply_custom_css(self):
         st.markdown(
@@ -138,15 +197,6 @@ class StreamlitChatApp:
         )
 
     ###########################################################################
-    # Helpers to get "stub" from the active client
-    ###########################################################################
-    @property
-    def stub(self):
-        if self.client:
-            return self.client.stub
-        return None
-
-    ###########################################################################
     # Login / Signup
     ###########################################################################
     def show_login_or_signup_page(self):
@@ -163,12 +213,9 @@ class StreamlitChatApp:
             hashed_pw = self.client.hash_password(password)
 
             if action == "Login":
-                if not self.stub:
-                    st.error("No gRPC stub available (server offline?).")
-                    return
-                resp = self.stub.Login(chat_service_pb2.LoginRequest(username=username, password=hashed_pw))
+                resp = self.client.login(username, hashed_pw)
                 if not resp:
-                    st.error("No response from server.")
+                    st.error("No response from server (all servers down?).")
                     return
                 if resp.status == "ok":
                     st.success("Logged in successfully!")
@@ -180,18 +227,15 @@ class StreamlitChatApp:
                     st.error(str(resp.status))
 
             else:  # "Create Account"
-                if not self.stub:
-                    st.error("No gRPC stub available (server offline?).")
-                    return
-                signup_resp = self.stub.Signup(chat_service_pb2.SignupRequest(username=username, password=hashed_pw))
+                signup_resp = self.client.signup(username, hashed_pw)
                 if not signup_resp:
-                    st.error("No response from server.")
+                    st.error("No response from server (all servers down?).")
                     return
                 if signup_resp.status != "ok":
                     st.error(signup_resp.msg if signup_resp.msg else "Account creation failed.")
                     return
                 # Auto-login
-                login_resp = self.stub.Login(chat_service_pb2.LoginRequest(username=username, password=hashed_pw))
+                login_resp = self.client.login(username, hashed_pw)
                 if not login_resp or login_resp.status != "ok":
                     st.error("Account created but auto-login failed.")
                     return
@@ -206,10 +250,7 @@ class StreamlitChatApp:
     ###########################################################################
     def show_home_page(self):
         st.header("Welcome!")
-        if not self.stub:
-            st.error("No gRPC stub available (server offline?).")
-            return
-        resp = self.stub.CountUnread(chat_service_pb2.CountUnreadRequest(auth_token=st.session_state.auth_token))
+        resp = self.client.count_unread(st.session_state.auth_token)
         if resp and resp.status == "ok":
             unread_count = resp.unread_count if resp.unread_count else 0
         else:
@@ -229,18 +270,13 @@ class StreamlitChatApp:
             if not recipient or not message_text:
                 st.error("Please fill in all fields.")
                 return
-            if not self.stub:
-                st.error("No gRPC stub available (server offline?).")
-                return
-            resp = self.stub.SendMessage(
-                chat_service_pb2.SendMessageRequest(
-                    auth_token=st.session_state.auth_token, 
-                    recipient=recipient, 
-                    content=message_text
-                )
+            resp = self.client.send_message(
+                auth_token=st.session_state.auth_token,
+                recipient=recipient,
+                content=message_text
             )
             if not resp:
-                st.error("No response from server.")
+                st.error("No response from server (all servers down?).")
                 return
             if resp.status == "ok":
                 st.success("Message sent!")
@@ -254,7 +290,6 @@ class StreamlitChatApp:
         st.header("Inbox")
         st_autorefresh(interval=5000, key="inbox_autorefresh")
 
-        # (A) Manual Fetch for Offline Messages
         st.write("**Manually fetch offline messages**")
         manual_fetch_count = st.number_input(
             "How many offline messages to fetch at once?",
@@ -267,42 +302,24 @@ class StreamlitChatApp:
             if manual_fetch_count <= 0:
                 st.warning("Enter a positive number.")
                 return
-            if not self.stub:
-                st.error("No gRPC stub available (server offline?).")
-                return
-            away_resp = self.stub.FetchAwayMsgs(
-                chat_service_pb2.FetchAwayMsgsRequest(
-                    limit=manual_fetch_count,
-                    auth_token=st.session_state.auth_token
-                )
-            )
+            away_resp = self.client.fetch_away_msgs(st.session_state.auth_token, manual_fetch_count)
             if not away_resp:
-                st.error("No response from server.")
+                st.error("No response from server (all servers down?).")
                 return
             if away_resp.status == "ok":
                 st.rerun()
             else:
                 st.error("Manual fetch failed or returned an error.")
 
-        # B) Pagination
         if "inbox_page" not in st.session_state:
             st.session_state.inbox_page = 0
         MESSAGES_PER_PAGE = 10
         current_page = st.session_state.inbox_page
         start_offset = current_page * MESSAGES_PER_PAGE
 
-        if not self.stub:
-            st.error("No gRPC stub available (server offline?).")
-            return
-        list_resp = self.stub.ListMessages(
-            chat_service_pb2.ListMessagesRequest(
-                auth_token=st.session_state.auth_token,
-                start=start_offset,
-                count=MESSAGES_PER_PAGE
-            )
-        )
+        list_resp = self.client.list_messages(st.session_state.auth_token, start_offset, MESSAGES_PER_PAGE)
         if not list_resp:
-            st.error("No response from server.")
+            st.error("No response from server (all servers down?).")
             return
         if list_resp.status != "ok":
             st.error(f"Could not fetch messages: {list_resp.msg}")
@@ -358,17 +375,9 @@ class StreamlitChatApp:
             if not selected_msg_ids:
                 st.warning("No messages selected for deletion.")
             else:
-                if not self.stub:
-                    st.error("No gRPC stub available (server offline?).")
-                    return
-                del_resp = self.stub.DeleteMessages(
-                    chat_service_pb2.DeleteMessagesRequest(
-                        auth_token=st.session_state.auth_token,
-                        message_ids_to_delete=selected_msg_ids
-                    )
-                )
+                del_resp = self.client.delete_messages(st.session_state.auth_token, selected_msg_ids)
                 if not del_resp:
-                    st.error("No response from server.")
+                    st.error("No response from server (all servers down?).")
                     return
                 if del_resp.status == "ok":
                     st.success(f"Deleted {len(selected_msg_ids)} message(s).")
@@ -403,18 +412,7 @@ class StreamlitChatApp:
             st.info("Enter a pattern (or '*') and click 'Search / Refresh'.")
             return
 
-        if not self.stub:
-            st.error("No gRPC stub available (server offline?).")
-            return
-
-        total_resp = self.stub.ListAccounts(
-            chat_service_pb2.ListAccountsRequest(
-                auth_token=st.session_state.auth_token,
-                pattern=pattern,
-                start=0,
-                count=1000
-            )
-        )
+        total_resp = self.client.list_accounts(st.session_state.auth_token, pattern, 0, 1000)
         if not total_resp or total_resp.status != "ok":
             st.error(f"Could not list accounts. Server status: {getattr(total_resp, 'status', 'no response')}")
             return
@@ -427,14 +425,7 @@ class StreamlitChatApp:
         current_page = st.session_state.account_page
         start_offset = current_page * accounts_per_page
 
-        page_resp = self.stub.ListAccounts(
-            chat_service_pb2.ListAccountsRequest(
-                auth_token=st.session_state.auth_token,
-                pattern=pattern,
-                start=start_offset,
-                count=accounts_per_page
-            )
-        )
+        page_resp = self.client.list_accounts(st.session_state.auth_token, pattern, start_offset, accounts_per_page)
         if not page_resp or page_resp.status != "ok":
             st.error(f"Could not list accounts (page). Server status: {getattr(page_resp, 'status', 'no response')}")
             return
@@ -466,12 +457,9 @@ class StreamlitChatApp:
         st.header("Delete My Account")
         st.warning("This will permanently delete your account and all associated messages!")
         if st.button("Confirm Delete Account"):
-            if not self.stub:
-                st.error("No gRPC stub available (server offline?).")
-                return
-            resp = self.stub.DeleteAccount(chat_service_pb2.EmptyRequest(auth_token=st.session_state.auth_token))
+            resp = self.client.delete_account(st.session_state.auth_token)
             if not resp:
-                st.error("No response from server.")
+                st.error("No response from server (all servers down?).")
                 return
             if resp.status == "ok":
                 st.success("Account deleted successfully!")
@@ -486,12 +474,9 @@ class StreamlitChatApp:
     ###########################################################################
     def show_logout_page(self):
         if st.button("Logout"):
-            if not self.stub:
-                st.error("No gRPC stub available (server offline?).")
-                return
-            resp = self.stub.Logout(chat_service_pb2.EmptyRequest(auth_token=st.session_state.auth_token))
+            resp = self.client.logout(st.session_state.auth_token)
             if not resp:
-                st.error("No response from server.")
+                st.error("No response from server (all servers down?).")
                 return
             if resp.status == "ok":
                 st.success("Logged out.")
@@ -502,39 +487,12 @@ class StreamlitChatApp:
                 st.error("Logout was refused by the server.")
 
     ###########################################################################
-    # Manual Failover Controls
-    ###########################################################################
-    def show_failover_controls(self):
-        """
-        Allows the user to manually select which server is "active."
-        This is how we handle manual failover (simply pick the server that is still up).
-        """
-        st.sidebar.markdown("### MANUAL FAILOVER CONTROLS")
-        if not self.server_addresses:
-            st.sidebar.warning("No server addresses configured.")
-            return
-        selected = st.sidebar.selectbox(
-            "Select Active Server",
-            self.server_addresses,
-            index=self.server_addresses.index(st.session_state.active_server) 
-            if st.session_state.active_server in self.server_addresses else 0
-        )
-        if selected != st.session_state.active_server:
-            st.session_state.active_server = selected
-            self._ensure_client()
-            st.rerun()
-
-    ###########################################################################
     # Main run_app
     ###########################################################################
     def run_app(self):
         self.apply_custom_css()
-        st.title("JoChat (Manual Failover Version)")
+        st.title("JoChat (Automatic Failover Version)")
 
-        # Show sidebar failover controls
-        self.show_failover_controls()
-
-        # Now show normal UI
         if st.session_state.logged_in:
             st.sidebar.markdown(f"**User: {st.session_state.username}**")
             menu = st.sidebar.radio(
@@ -556,11 +514,12 @@ class StreamlitChatApp:
         else:
             self.show_login_or_signup_page()
 
+
 # -----------------------------------------------------------------------------
 # Entry point
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="JoChat Client (Manual Failover)")
+    parser = argparse.ArgumentParser(description="JoChat Client (Automatic Failover)")
     parser.add_argument("--servers", type=str, default="127.0.0.1:50051",
                         help="Comma-separated list of possible servers (e.g. '127.0.0.1:50051,127.0.0.1:50052')")
     args = parser.parse_args()
