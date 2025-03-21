@@ -2,6 +2,7 @@ import grpc
 from concurrent import futures
 from multiprocessing import Manager
 import secrets
+import argparse
 
 from database import Database  # ✅ Import your database class
 
@@ -11,9 +12,77 @@ import chat_service_pb2
 import chat_service_pb2_grpc
 
 class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
-    def __init__(self, db, logged_in_users):
-        self.db = db 
+    def __init__(self, db, logged_in_users, is_primary=False, backup_addresses=None):
+        self.db = db
         self.logged_in_users = logged_in_users
+        self.is_primary = is_primary
+        self.backup_addresses = backup_addresses or []
+
+    def replicate_to_backups(self, op_type, **kwargs):
+        # For each backup address, call a "Replicate" RPC.
+        for addr in self.backup_addresses:
+            try:
+                channel = grpc.insecure_channel(addr)
+                stub = chat_service_pb2_grpc.ChatServiceStub(channel)
+
+                req = chat_service_pb2.ReplicationRequest(op_type=op_type)
+
+                if "sender" in kwargs:
+                    req.sender = kwargs["sender"]
+                if "recipient" in kwargs:
+                    req.recipient = kwargs["recipient"]
+                if "content" in kwargs:
+                    req.content = kwargs["content"]
+                if "message_ids" in kwargs:
+                    req.message_ids.extend(kwargs["message_ids"])
+
+                stub.Replicate(req)
+            except Exception as e:
+                print(f"[Primary] Failed to replicate to {addr}: {e}")
+
+    def Replicate(self, request, context):
+        op_type = request.op_type
+        if op_type == "INSERT_MESSAGE":
+            self.db.execute(
+                """INSERT INTO messages (sender, recipient, content, to_deliver)
+                   VALUES (?, ?, ?, ?)""",
+                (request.sender, request.recipient, request.content, 1),
+                commit=True
+            )
+            return chat_service_pb2.GenericResponse(status="ok", msg="Replicated insert")
+
+        elif op_type == "DELETE_MESSAGES":
+            placeholders = ",".join(["?" for _ in request.message_ids])
+            self.db.execute(
+                f"DELETE FROM messages WHERE id IN ({placeholders})",
+                tuple(request.message_ids),
+                commit=True
+            )
+            return chat_service_pb2.GenericResponse(status="ok", msg="Replicated delete")
+
+        elif op_type == "SIGNUP_USER":
+            self.db.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (request.sender, request.content),
+                commit=True
+            )
+            return chat_service_pb2.GenericResponse(status="ok", msg="Replicated signup")
+
+        elif op_type == "DELETE_ACCOUNT":
+            user_to_del = request.sender
+            self.db.execute(
+                "DELETE FROM messages WHERE sender=? OR recipient=?",
+                (user_to_del, user_to_del),
+                commit=True
+            )
+            self.db.execute(
+                "DELETE FROM users WHERE username=?",
+                (user_to_del,),
+                commit=True
+            )
+            return chat_service_pb2.GenericResponse(status="ok", msg="Replicated account delete")
+
+        return chat_service_pb2.GenericResponse(status="error", msg="Unknown replication op_type")
 
     def Signup(self, request, context):
         """Handles user signup requests."""
@@ -30,8 +99,14 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
 
         self.db.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password), commit=True)
         
+        if self.is_primary:
+            self.replicate_to_backups(
+                "SIGNUP_USER",
+                sender=username,
+                content=password
+            )
+        
         return chat_service_pb2.GenericResponse(status="ok", msg="Signup successful")
-
 
     def Login(self, request, context):
         """Handles user login requests."""
@@ -111,6 +186,14 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
 
         self.db.execute(""" INSERT INTO messages (sender, recipient, content, to_deliver) VALUES (?, ?, ?, ?) """, (sender, recipient, content, delivered_value), commit=True)
 
+        if self.is_primary:
+            self.replicate_to_backups(
+                "INSERT_MESSAGE",
+                sender=sender,
+                recipient=recipient,
+                content=content
+            )
+
         return chat_service_pb2.GenericResponse(status="ok", msg="Message sent")
     
     def ListMessages(self, request, context):
@@ -150,8 +233,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
         cur_user = self.logged_in_users.get(request.auth_token, -1)
         if request.auth_token not in self.logged_in_users:
             return chat_service_pb2.GenericResponse(status="error", msg="Not logged in")
-        
-        # the CLIENT SIDE MUST VERIFY IF NO LIMIT SET. IM ASSUMING THIS IS SET. JOSEPH.
+    
 
         # Find messages that have not been delivered yet
         rows = self.db.execute("""SELECT id, sender, content FROM messages WHERE recipient=? AND to_deliver=0 ORDER BY id ASC LIMIT ?""", (cur_user, request.limit), commit=True)
@@ -190,6 +272,12 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
         
         self.db.execute(f"DELETE FROM messages WHERE recipient=? AND id IN ({placeholders})", [self.logged_in_users[auth_token]] + list(request.message_ids_to_delete), commit=True)
 
+        if self.is_primary:
+            self.replicate_to_backups(
+                "DELETE_MESSAGES",
+                message_ids=request.message_ids_to_delete
+            )
+
         return chat_service_pb2.DeleteMessagesResponse(status="ok", msg="Messages deleted successfully", deleted_count=len(request.message_ids_to_delete))
         
     def DeleteAccount(self, request, context):
@@ -201,6 +289,12 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
         self.db.execute("DELETE FROM messages WHERE sender=? OR recipient=?", (username, username), commit=True)
         self.db.execute("DELETE FROM users WHERE username=?", (username,), commit=True)
         del self.logged_in_users[auth_token]
+
+        if self.is_primary:
+            self.replicate_to_backups(
+                "DELETE_ACCOUNT",
+                sender=username
+            )
 
         return chat_service_pb2.GenericResponse(status="ok", msg="Account deleted successfully")
 
@@ -217,15 +311,31 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
 
 
 def serve():
-    db = Database("chat.db")
+    parser = argparse.ArgumentParser(description="Chat Server with Replication")
+    parser.add_argument("--port", type=int, default=50051, help="Port to listen on")
+    parser.add_argument("--db_file", type=str, default="chat.db", help="SQLite DB file name")
+    parser.add_argument("--role", type=str, default="primary", choices=["primary","backup"], help="primary or backup role")
+    parser.add_argument("--backups", type=str, default="", help="Comma-separated backup addresses, only used if primary")
+    args = parser.parse_args()
+
+    db = Database(args.db_file)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    # we use a thread safe, but shared dictionary of auth-tokens->usernames
+
     chat_service_pb2_grpc.add_ChatServiceServicer_to_server(
-        ChatServiceServicer(db=db, logged_in_users=Manager().dict()),
+        ChatServiceServicer(
+            db=db,
+            logged_in_users=Manager().dict(),
+            is_primary=(args.role == "primary"),
+            backup_addresses=[addr.strip() for addr in args.backups.split(",") if addr.strip()]
+        ),
         server
     )
-    server.add_insecure_port("[::]:50051")
-    print("Starting gRPC server on port 50051...")
+
+    listen_addr = f"[::]:{args.port}"
+    server.add_insecure_port(listen_addr)
+    print(f"Starting {args.role} server on port {args.port} with DB={args.db_file}")
+    if args.role == "primary":
+        print(f"Backups: {[addr.strip() for addr in args.backups.split(',') if addr.strip()]}")
     server.start()
     server.wait_for_termination()
 
