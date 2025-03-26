@@ -9,8 +9,9 @@ from test_6_test_invalid_login import TestInvalidLogin
 from test_7_auth_required import TestAuthenticationRequired
 from test_8_logout_login import TestLogoutLogin
 from test_9_send_messsages_to_client import TestSendMessagesToClient
-from server.test_suite_server.test_10_delete_account import TestDeleteAccount
-from server.test_suite_server.test_11_list_accounts import TestListAccounts
+from test_10_delete_account import TestDeleteAccount
+from test_11_list_accounts import TestListAccounts
+
 
 if __name__ == "__main__":
     unittest.TextTestRunner(verbosity=2).run(
@@ -25,6 +26,6 @@ if __name__ == "__main__":
             unittest.defaultTestLoader.loadTestsFromTestCase(TestLogoutLogin),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestSendMessagesToClient),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteAccount),
-            unittest.defaultTestLoader.loadTestsFromTestCase(TestListAccounts)
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestListAccounts),
         ])
     )
