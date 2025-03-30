@@ -69,7 +69,7 @@ class ChatServiceStub(object):
         self.FetchAwayMsgs = channel.unary_unary(
                 '/chat.ChatService/FetchAwayMsgs',
                 request_serializer=chat__service__pb2.FetchAwayMsgsRequest.SerializeToString,
-                response_deserializer=chat__service__pb2.GenericResponse.FromString,
+                response_deserializer=chat__service__pb2.ListMessagesResponse.FromString,
                 _registered_method=True)
         self.ListAccounts = channel.unary_unary(
                 '/chat.ChatService/ListAccounts',
@@ -96,6 +96,11 @@ class ChatServiceStub(object):
                 request_serializer=chat__service__pb2.ReplicationRequest.SerializeToString,
                 response_deserializer=chat__service__pb2.GenericResponse.FromString,
                 _registered_method=True)
+        self.Heartbeat = channel.unary_unary(
+                '/chat.ChatService/Heartbeat',
+                request_serializer=chat__service__pb2.HeartbeatRequest.SerializeToString,
+                response_deserializer=chat__service__pb2.HeartbeatResponse.FromString,
+                _registered_method=True)
 
 
 class ChatServiceServicer(object):
@@ -104,85 +109,79 @@ class ChatServiceServicer(object):
     """
 
     def Signup(self, request, context):
-        """1) signup
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Login(self, request, context):
-        """2) login
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Logout(self, request, context):
-        """3) logout
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def CountUnread(self, request, context):
-        """4) count_unread
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def SendMessage(self, request, context):
-        """5) send_message
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListMessages(self, request, context):
-        """6) send_messages_to_client
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def FetchAwayMsgs(self, request, context):
-        """7) fetch_away_msgs
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListAccounts(self, request, context):
-        """8) list_accounts
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def DeleteMessages(self, request, context):
-        """9) delete_messages
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def DeleteAccount(self, request, context):
-        """10) delete_account
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ResetDB(self, request, context):
-        """11) reset_db
-        """
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Replicate(self, request, context):
-        """12) replicate
-        Replication RPC method - for the primary to replicate operations to backups.
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Heartbeat(self, request, context):
+        """Heartbeat for leader election
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -224,7 +223,7 @@ def add_ChatServiceServicer_to_server(servicer, server):
             'FetchAwayMsgs': grpc.unary_unary_rpc_method_handler(
                     servicer.FetchAwayMsgs,
                     request_deserializer=chat__service__pb2.FetchAwayMsgsRequest.FromString,
-                    response_serializer=chat__service__pb2.GenericResponse.SerializeToString,
+                    response_serializer=chat__service__pb2.ListMessagesResponse.SerializeToString,
             ),
             'ListAccounts': grpc.unary_unary_rpc_method_handler(
                     servicer.ListAccounts,
@@ -250,6 +249,11 @@ def add_ChatServiceServicer_to_server(servicer, server):
                     servicer.Replicate,
                     request_deserializer=chat__service__pb2.ReplicationRequest.FromString,
                     response_serializer=chat__service__pb2.GenericResponse.SerializeToString,
+            ),
+            'Heartbeat': grpc.unary_unary_rpc_method_handler(
+                    servicer.Heartbeat,
+                    request_deserializer=chat__service__pb2.HeartbeatRequest.FromString,
+                    response_serializer=chat__service__pb2.HeartbeatResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -442,7 +446,7 @@ class ChatService(object):
             target,
             '/chat.ChatService/FetchAwayMsgs',
             chat__service__pb2.FetchAwayMsgsRequest.SerializeToString,
-            chat__service__pb2.GenericResponse.FromString,
+            chat__service__pb2.ListMessagesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -578,6 +582,33 @@ class ChatService(object):
             '/chat.ChatService/Replicate',
             chat__service__pb2.ReplicationRequest.SerializeToString,
             chat__service__pb2.GenericResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Heartbeat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/chat.ChatService/Heartbeat',
+            chat__service__pb2.HeartbeatRequest.SerializeToString,
+            chat__service__pb2.HeartbeatResponse.FromString,
             options,
             channel_credentials,
             insecure,

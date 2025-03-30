@@ -3,40 +3,29 @@ syntax = "proto3";
 package chat;
 
 // ========== RESPONSE MESSAGES ==========
-// Because your "responses" all have a similar style -- 
-// i.e., a "status" field, "msg" (some message text), and 
-// possibly extra fields (unread_count, etc.) -- 
-// we define them below.
 
 message GenericResponse {
-  // For "status" = "ok" or "error"
   string status = 1;  
-  // For e.g. "Signup successful", "Wrong password", etc.
   string msg = 2;
 }
 
-// Some actions return extra fields (like unread_count).
-// For example, "login" returns an auth_token and unread_count
 message LoginResponse {
-  string auth_token = 1; // 
-  string status = 2;
-  string msg    = 3;
+  string auth_token = 1;
+  string status     = 2;
+  string msg        = 3;
   int32 unread_count = 4;
 }
 
-// For example, "count_unread" returns an unread_count
 message CountUnreadResponse {
   string status = 1;
   string msg    = 2;
   int32 unread_count = 3;
 }
 
-// For "send_messages_to_client" or "fetch_away_msgs", 
-// we may return a repeated list of messages
 message ChatMessage {
-  int32 id        = 1;
-  string sender   = 2;
-  string content  = 3;
+  int32 id       = 1;
+  string sender  = 2;
+  string content = 3;
 }
 
 message ListMessagesResponse {
@@ -46,7 +35,6 @@ message ListMessagesResponse {
   int32 total_count = 4;  // total # messages (for paging)
 }
 
-// For "list_accounts", we can store repeated user records:
 message UserRecord {
   int32 id = 1;
   string username = 2;
@@ -58,7 +46,6 @@ message ListAccountsResponse {
   repeated UserRecord users = 3;
 }
 
-// For "delete_messages" specifically, we return how many got deleted:
 message DeleteMessagesResponse {
   string status = 1;
   string msg    = 2;
@@ -67,111 +54,90 @@ message DeleteMessagesResponse {
 
 // ========== REQUEST MESSAGES ==========
 
-// For signup
 message SignupRequest {
   string username = 1;
-  string password = 2;  // e.g. "password hash"
+  string password = 2;
 }
 
-// # for 'login"
 message LoginRequest {
   string username = 1;
-  string password = 2;  // e.g. "password hash"
+  string password = 2;
 }
 
-// For "logout", "send_messages_to_client", "delete_account", "reset_db"
-// we might not need any fields, but we still define 
-// an empty request message to keep the interface consistent:
-// well we need 1 field
 message EmptyRequest {
-    string auth_token = 1;
+  string auth_token = 1;
 }
 
-// For "count_unread" also might be an empty request
 message CountUnreadRequest {
-    string auth_token = 1;
+  string auth_token = 1;
 }
 
-// For "send_message"
 message SendMessageRequest {
   string auth_token = 1;
-  string recipient = 2;
-  string content   = 3; // the server knows via the auth token who the sender is
+  string recipient  = 2;
+  string content    = 3;
 }
 
-// for "list_messages"
 message ListMessagesRequest {
   string auth_token = 1;
-  int32 start       = 2;  // 0-based offset
-  int32 count       = 3;  // how many messages to return
+  int32 start       = 2;
+  int32 count       = 3;
 }
 
-// For "fetch_away_msgs"
 message FetchAwayMsgsRequest {
   string auth_token = 1;
-  int32 limit = 2;
+  int32 limit       = 2;
 }
 
-// For "list_accounts"
 message ListAccountsRequest {
   string auth_token = 1;
-  string pattern = 2; 
-  int32 start = 3;
-  int32 count = 4;
+  string pattern    = 2; 
+  int32 start       = 3;
+  int32 count       = 4;
 }
 
-// For "delete_messages"
 message DeleteMessagesRequest {
   string auth_token = 1;
   repeated int32 message_ids_to_delete = 2;
 }
 
-// NEW: Replication Request message
 message ReplicationRequest {
-  string op_type = 1;      // Operation type (e.g., "INSERT_MESSAGE", "DELETE_ACCOUNT", etc.)
-  string sender = 2;       // Username or sender field
-  string recipient = 3;    // Recipient field (if applicable)
-  string content = 4;      // Message content or other operation data (e.g., password hash)
-  repeated int32 message_ids = 5; // For operations like deleting messages
+  string op_type   = 1;
+  string sender    = 2;
+  string recipient = 3;
+  string content   = 4; // e.g. msg text or password hash
+  repeated int32 message_ids = 5;
+}
+
+// NEW: Heartbeat for leader election
+message HeartbeatRequest {
+  int32 leader_id = 1;  // ID of the node claiming leadership
+  int32 server_id = 2;  // ID of the node sending the heartbeat
+}
+
+message HeartbeatResponse {
+  string status = 1;
+  string msg    = 2;
+  int32 current_leader_id = 3; // for convenience: who this server thinks the leader is
 }
 
 // ========== SERVICE DEFINITION ==========
 
 service ChatService {
-  // 1) signup
   rpc Signup(SignupRequest) returns (GenericResponse);
-
-  // 2) login
   rpc Login(LoginRequest) returns (LoginResponse);
-
-  // 3) logout
   rpc Logout(EmptyRequest) returns (GenericResponse);
-
-  // 4) count_unread
   rpc CountUnread(CountUnreadRequest) returns (CountUnreadResponse);
-
-  // 5) send_message
   rpc SendMessage(SendMessageRequest) returns (GenericResponse);
-
-  // 6) send_messages_to_client
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
-
-  // 7) fetch_away_msgs
-  rpc FetchAwayMsgs(FetchAwayMsgsRequest) returns (GenericResponse);
-
-  // 8) list_accounts
+  rpc FetchAwayMsgs(FetchAwayMsgsRequest) returns (ListMessagesResponse);
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
-
-  // 9) delete_messages
   rpc DeleteMessages(DeleteMessagesRequest) returns (DeleteMessagesResponse);
-
-  // 10) delete_account
   rpc DeleteAccount(EmptyRequest) returns (GenericResponse);
-
-  // 11) reset_db
   rpc ResetDB(EmptyRequest) returns (GenericResponse);
 
-  // 12) replicate
-  // Replication RPC method - for the primary to replicate operations to backups.
   rpc Replicate(ReplicationRequest) returns (GenericResponse);
+
+  // Heartbeat for leader election
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
