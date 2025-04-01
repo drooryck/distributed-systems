@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-package chat;
-
 // ========== RESPONSE MESSAGES ==========
 
 message GenericResponse {
@@ -102,11 +100,12 @@ message DeleteMessagesRequest {
 }
 
 message ReplicationRequest {
-  string op_type   = 1;
-  string sender    = 2;
+  string op_type   = 1;  // e.g. "CREATE_SESSION", "INSERT_MESSAGE"
+  string sender    = 2;  // used for user creation, sending messages, etc.
   string recipient = 3;
-  string content   = 4; // e.g. msg text or password hash
-  repeated int32 message_ids = 5;
+  string content   = 4;
+  string auth_token = 5;
+  repeated int32 message_ids = 6;
 }
 
 // NEW: Heartbeat for leader election
@@ -119,6 +118,18 @@ message HeartbeatResponse {
   string status = 1;
   string msg    = 2;
   int32 current_leader_id = 3; // for convenience: who this server thinks the leader is
+}
+
+// NEW: Cluster info for replication
+message ServerInfo {
+  int32 server_id = 1;
+  string address = 2;
+}
+
+message ClusterInfoResponse {
+  string status = 1;
+  string msg = 2;
+  repeated ServerInfo servers = 3;
 }
 
 // ========== SERVICE DEFINITION ==========
@@ -140,4 +151,7 @@ service ChatService {
 
   // Heartbeat for leader election
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // cluster info rpc
+  rpc ClusterInfo(EmptyRequest) returns (ClusterInfoResponse);
 }

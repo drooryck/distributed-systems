@@ -24,6 +24,12 @@ class Database:
             );
         """)
         self.conn.commit()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                auth_token TEXT PRIMARY KEY,
+                username TEXT NOT NULL
+            );
+        """)
 
     def execute(self, query, params=(), commit=False):
         c = self.conn.cursor()

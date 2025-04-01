@@ -6,7 +6,6 @@ import argparse
 import sys, os
 import grpc
 
-# Adjust path if needed so that the proto-generated files are found.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from protocol import chat_service_pb2
 from protocol import chat_service_pb2_grpc
@@ -25,74 +24,80 @@ class ChatServerClient:
             raise ValueError("No server addresses provided.")
         self.server_addresses = server_addresses
         self.current_idx = 0
-        self.stub = None
-        self._connect_stub(self.server_addresses[self.current_idx])
 
-    def _connect_stub(self, address):
-        channel = grpc.insecure_channel(address)
-        self.stub = chat_service_pb2_grpc.ChatServiceStub(channel)
-
-    def _try_stub_call(self, func, *args, **kwargs):
+    def _try_stub_call(self, rpc_name, request):
         num_servers = len(self.server_addresses)
         attempts = 0
         while attempts < num_servers:
+            addr = self.server_addresses[self.current_idx]
             try:
-                response = func(*args, **kwargs)
-                # If the response has status="error" and msg="NOT_LEADER", treat it like a fail
+                channel = grpc.insecure_channel(addr)
+                stub = chat_service_pb2_grpc.ChatServiceStub(channel)
+                rpc_method = getattr(stub, rpc_name)
+                response = rpc_method(request, timeout=2.0)
+
                 if hasattr(response, "status") and response.status == "error" and response.msg == "NOT_LEADER":
                     raise grpc.RpcError("Server not leader")
+                
+                st.error(f"found leader, it is server {addr}")
                 return response
+
             except grpc.RpcError as e:
-                st.warning(f"Server {self.server_addresses[self.current_idx]} failed or not leader: {e}. Trying next.")
+                st.warning(f"Server {addr} failed or not leader: {e}. Trying next.")
                 self.current_idx = (self.current_idx + 1) % num_servers
-                self._connect_stub(self.server_addresses[self.current_idx])
                 attempts += 1
+
         st.error("All servers are down or refusing writes.")
         return None
 
     def signup(self, username, password):
         req = chat_service_pb2.SignupRequest(username=username, password=password)
-        return self._try_stub_call(self.stub.Signup, req)
+        return self._try_stub_call("Signup", req)
 
     def login(self, username, password):
         req = chat_service_pb2.LoginRequest(username=username, password=password)
-        return self._try_stub_call(self.stub.Login, req)
+        return self._try_stub_call("Login", req)
 
     def logout(self, auth_token):
         req = chat_service_pb2.EmptyRequest(auth_token=auth_token)
-        return self._try_stub_call(self.stub.Logout, req)
+        return self._try_stub_call("Logout", req)
 
     def count_unread(self, auth_token):
         req = chat_service_pb2.CountUnreadRequest(auth_token=auth_token)
-        return self._try_stub_call(self.stub.CountUnread, req)
+        return self._try_stub_call("CountUnread", req)
 
     def send_message(self, auth_token, recipient, content):
         req = chat_service_pb2.SendMessageRequest(auth_token=auth_token, recipient=recipient, content=content)
-        return self._try_stub_call(self.stub.SendMessage, req)
+        return self._try_stub_call("SendMessage", req)
 
     def list_messages(self, auth_token, start, count):
         req = chat_service_pb2.ListMessagesRequest(auth_token=auth_token, start=start, count=count)
-        return self._try_stub_call(self.stub.ListMessages, req)
+        return self._try_stub_call("ListMessages", req)
 
     def fetch_away_msgs(self, auth_token, limit):
         req = chat_service_pb2.FetchAwayMsgsRequest(auth_token=auth_token, limit=limit)
-        return self._try_stub_call(self.stub.FetchAwayMsgs, req)
+        return self._try_stub_call("FetchAwayMsgs", req)
 
     def list_accounts(self, auth_token, pattern, start, count):
         req = chat_service_pb2.ListAccountsRequest(auth_token=auth_token, pattern=pattern, start=start, count=count)
-        return self._try_stub_call(self.stub.ListAccounts, req)
+        return self._try_stub_call("ListAccounts", req)
 
     def delete_messages(self, auth_token, message_ids):
         req = chat_service_pb2.DeleteMessagesRequest(auth_token=auth_token, message_ids_to_delete=message_ids)
-        return self._try_stub_call(self.stub.DeleteMessages, req)
+        return self._try_stub_call("DeleteMessages", req)
 
     def delete_account(self, auth_token):
         req = chat_service_pb2.EmptyRequest(auth_token=auth_token)
-        return self._try_stub_call(self.stub.DeleteAccount, req)
+        return self._try_stub_call("DeleteAccount", req)
+    
+    def get_cluster_info(self, auth_token):
+        req = chat_service_pb2.EmptyRequest(auth_token=auth_token)
+        return self._try_stub_call("ClusterInfo", req)
 
     @staticmethod
     def hash_password(password):
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 
 
 ###############################################################################
@@ -148,16 +153,19 @@ class StreamlitChatApp:
                 background-color: #2c3e50;
                 color: #ecf0f1;
             }
+            .delete-btn {
+                background: none;
+                border: none;
+                font-size: 1.5rem;
+                cursor: pointer;
+                color: #e74c3c;
+            }           
             </style>
             """,
             unsafe_allow_html=True
         )
 
-    def show_server_list(self):
-        st.sidebar.markdown("### Available Servers")
-        for server in self.client.server_addresses:
-            st.sidebar.write(server)
-        st.sidebar.markdown(f"**Current Server:** {self.client.server_addresses[self.client.current_idx]}")
+
 
     def show_login_or_signup_page(self):
         st.header("Login or Create Account")
@@ -386,13 +394,24 @@ class StreamlitChatApp:
             else:
                 st.error("Logout was refused by the server.")
 
+    def show_cluster_info_page(self):
+        st.header("Cluster Information")
+        resp = self.client.get_cluster_info(auth_token=st.session_state.auth_token)
+        if not resp or resp.status != "ok":
+            st.error("Failed to retrieve cluster information.")
+            return
+        st.write(f"{resp.msg}")
+        st.write("Alive servers:")
+        for server in resp.servers:
+            st.write(f"Server {server.server_id}: {server.address}")
+
+
     def run_app(self):
         self.apply_custom_css()
         st.title("JoChat (Leader-Election Edition)")
-        self.show_server_list()
         if st.session_state.logged_in:
             st.sidebar.markdown(f"**User:** {st.session_state.username}")
-            menu = st.sidebar.radio("Navigation", ["Home", "Send Message", "Inbox", "List Accounts", "Delete Account", "Logout"])
+            menu = st.sidebar.radio("Navigation", ["Home", "Send Message", "Inbox", "List Accounts", "Delete Account", "Logout", "Cluster Info"])
             if menu == "Home":
                 self.show_home_page()
             elif menu == "Send Message":
@@ -405,6 +424,8 @@ class StreamlitChatApp:
                 self.show_delete_account_page()
             elif menu == "Logout":
                 self.show_logout_page()
+            elif menu == "Cluster Info":
+                self.show_cluster_info_page()
         else:
             self.show_login_or_signup_page()
 
@@ -413,6 +434,7 @@ if __name__ == "__main__":
     parser.add_argument("--servers", type=str, default="127.0.0.1:50051,127.0.0.1:50052,127.0.0.1:50053",
                         help="Comma-separated list of server addresses")
     args = parser.parse_args()
+
     server_list = [s.strip() for s in args.servers.split(",") if s.strip()]
     app = StreamlitChatApp(server_list)
     app.run_app()
