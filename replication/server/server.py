@@ -378,11 +378,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             return chat_service_pb2.GenericResponse(status="error", msg="Recipient not found")
         recipient = row[0][0]
         row = self.db.execute("SELECT username FROM sessions WHERE username=?", (request.recipient,), commit=True)
-        loggedin = row[0][0]
-        if loggedin:
-            delivered_value = 1
-        else:
-            delivered_value = 0
+        delivered_value = 1 if row else 0
 
 
         self.db.execute( "INSERT INTO messages (sender, recipient, content, to_deliver) VALUES (?, ?, ?, ?)", (sender, recipient, content, delivered_value), commit=True)
