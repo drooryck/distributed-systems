@@ -39,11 +39,11 @@ class ChatServerClient:
                 if hasattr(response, "status") and response.status == "error" and response.msg == "NOT_LEADER":
                     raise grpc.RpcError("Server not leader")
                 
-                st.error(f"found leader, it is server {addr}")
+                # st.error(f"found leader, it is server {addr}")
                 return response
 
-            except grpc.RpcError as e:
-                st.warning(f"Server {addr} failed or not leader: {e}. Trying next.")
+            except grpc.RpcError:
+                st.warning(f"Server {addr} failed or not leader. Trying next.")
                 self.current_idx = (self.current_idx + 1) % num_servers
                 attempts += 1
 
