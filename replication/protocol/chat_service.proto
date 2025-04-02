@@ -63,7 +63,7 @@ message LoginRequest {
 }
 
 message EmptyRequest {
-  string auth_token = 1;
+  optional string auth_token = 1;
 }
 
 message CountUnreadRequest {
@@ -106,6 +106,8 @@ message ReplicationRequest {
   string content   = 4;
   string auth_token = 5;
   repeated int32 message_ids = 6;
+  int32 new_server_id = 7;
+  string new_server_address = 8;
 }
 
 // NEW: Heartbeat for leader election
@@ -130,7 +132,51 @@ message ClusterInfoResponse {
   string status = 1;
   string msg = 2;
   repeated ServerInfo servers = 3;
+  ServerInfo leader = 4;
 }
+
+
+// FOR REJOIN:
+
+// For returning entire DB contents in one shot.
+message FullSnapshot {
+  repeated UserDataRecord users       = 1;
+  repeated ChatMessageRecord messages   = 2;
+  repeated SessionRecord sessions = 3;
+}
+
+message ChatMessageRecord {
+  int32 id        = 1;
+  string sender   = 2;
+  string recipient = 3;
+  string content  = 4;
+  bool to_deliver = 5;
+}
+
+message SessionRecord {
+  string auth_token = 1;
+  string username   = 2;
+}
+
+message UserDataRecord {
+  int32 id = 1;
+  string username = 2;
+  string password_hash = 3;
+}
+
+message AddReplicaResponse {
+  string status = 1;
+  string msg = 2;
+  FullSnapshot snapshot = 3;
+  repeated ServerInfo peers = 4;
+}
+
+message AddReplicaRequest {
+  int32 new_server_id = 1;
+  string new_server_address = 2;
+}
+
+
 
 // ========== SERVICE DEFINITION ==========
 
@@ -154,4 +200,6 @@ service ChatService {
 
   // cluster info rpc
   rpc ClusterInfo(EmptyRequest) returns (ClusterInfoResponse);
+  rpc GetFullSnapshot(EmptyRequest) returns (FullSnapshot);
+  rpc AddReplica(AddReplicaRequest) returns (AddReplicaResponse);
 }

@@ -5,6 +5,7 @@ import hashlib
 import argparse
 import sys, os
 import grpc
+import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from protocol import chat_service_pb2
@@ -24,8 +25,13 @@ class ChatServerClient:
             raise ValueError("No server addresses provided.")
         self.server_addresses = server_addresses
         self.current_idx = 0
+        self.last_update_time = 0
+        self.ttl = 10  # seconds
 
     def _try_stub_call(self, rpc_name, request):
+        now = time.time()
+        if now - self.last_update_time > self.ttl:
+            self._refresh_server_list(request)
         num_servers = len(self.server_addresses)
         attempts = 0
         while attempts < num_servers:
@@ -39,16 +45,32 @@ class ChatServerClient:
                 if hasattr(response, "status") and response.status == "error" and response.msg == "NOT_LEADER":
                     raise grpc.RpcError("Server not leader")
                 
-                st.error(f"found leader, it is server {addr}")
+                # CAN BE NICE TO HAVE IN DEBUG MODE
+                # st.success(f"found leader, it is server {addr}")
                 return response
 
             except grpc.RpcError as e:
-                st.warning(f"Server {addr} failed or not leader: {e}. Trying next.")
+                # MAY WANT TO INCLUDE 'e' for DEBUGGING PURPOSES.
+                st.warning(f"Server {addr} failed or not leader:. Trying next.")
                 self.current_idx = (self.current_idx + 1) % num_servers
                 attempts += 1
 
         st.error("All servers are down or refusing writes.")
         return None
+
+    def _refresh_server_list(self, request):
+        for addr in self.server_addresses:
+            try:
+                channel = grpc.insecure_channel(addr)
+                stub = chat_service_pb2_grpc.ChatServiceStub(channel)
+                cluster_info = stub.ClusterInfo(request, timeout=2.0)
+                if cluster_info.status == "ok":
+                    updated = [s.address for s in cluster_info.servers if s.address not in self.server_addresses]
+                    self.server_addresses.extend(updated)
+                    self.last_update_time = time.time()
+                    return
+            except:
+                continue
 
     def signup(self, username, password):
         req = chat_service_pb2.SignupRequest(username=username, password=password)
@@ -397,13 +419,31 @@ class StreamlitChatApp:
     def show_cluster_info_page(self):
         st.header("Cluster Information")
         resp = self.client.get_cluster_info(auth_token=st.session_state.auth_token)
-        if not resp or resp.status != "ok":
-            st.error("Failed to retrieve cluster information.")
+        if not resp:
+            st.error("Failed to retrieve cluster information. All servers may be unreachable.")
             return
-        st.write(f"{resp.msg}")
-        st.write("Alive servers:")
-        for server in resp.servers:
-            st.write(f"Server {server.server_id}: {server.address}")
+        
+        if resp.status != "ok":
+            st.error(f"Failed to retrieve cluster information: {resp.msg}")
+            return
+        
+        # Show leader information
+        if hasattr(resp, 'leader') and resp.leader.server_id != -1:
+            st.write("### Leader server:")
+            st.write(f"Server {resp.leader.server_id}: {resp.leader.address}")
+        else:
+            st.warning("No active leader found in the cluster")
+        
+        # Show alive servers
+        if hasattr(resp, 'servers') and len(resp.servers) > 0:
+            st.write("### Known servers:")
+            for server in resp.servers:
+                # Add a visual indicator for the leader
+                is_leader = hasattr(resp, 'leader') and server.server_id == resp.leader.server_id
+                leader_badge = "🔴 LEADER" if is_leader else ""
+                st.write(f"Server {server.server_id}: {server.address} {leader_badge}")
+        else:
+            st.warning("No active servers found in the cluster")
 
 
     def run_app(self):

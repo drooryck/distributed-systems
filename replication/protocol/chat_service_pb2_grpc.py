@@ -106,6 +106,16 @@ class ChatServiceStub(object):
                 request_serializer=protocol_dot_chat__service__pb2.EmptyRequest.SerializeToString,
                 response_deserializer=protocol_dot_chat__service__pb2.ClusterInfoResponse.FromString,
                 _registered_method=True)
+        self.GetFullSnapshot = channel.unary_unary(
+                '/ChatService/GetFullSnapshot',
+                request_serializer=protocol_dot_chat__service__pb2.EmptyRequest.SerializeToString,
+                response_deserializer=protocol_dot_chat__service__pb2.FullSnapshot.FromString,
+                _registered_method=True)
+        self.AddReplica = channel.unary_unary(
+                '/ChatService/AddReplica',
+                request_serializer=protocol_dot_chat__service__pb2.AddReplicaRequest.SerializeToString,
+                response_deserializer=protocol_dot_chat__service__pb2.AddReplicaResponse.FromString,
+                _registered_method=True)
 
 
 class ChatServiceServicer(object):
@@ -199,6 +209,18 @@ class ChatServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetFullSnapshot(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AddReplica(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ChatServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -271,6 +293,16 @@ def add_ChatServiceServicer_to_server(servicer, server):
                     servicer.ClusterInfo,
                     request_deserializer=protocol_dot_chat__service__pb2.EmptyRequest.FromString,
                     response_serializer=protocol_dot_chat__service__pb2.ClusterInfoResponse.SerializeToString,
+            ),
+            'GetFullSnapshot': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetFullSnapshot,
+                    request_deserializer=protocol_dot_chat__service__pb2.EmptyRequest.FromString,
+                    response_serializer=protocol_dot_chat__service__pb2.FullSnapshot.SerializeToString,
+            ),
+            'AddReplica': grpc.unary_unary_rpc_method_handler(
+                    servicer.AddReplica,
+                    request_deserializer=protocol_dot_chat__service__pb2.AddReplicaRequest.FromString,
+                    response_serializer=protocol_dot_chat__service__pb2.AddReplicaResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -653,6 +685,60 @@ class ChatService(object):
             '/ChatService/ClusterInfo',
             protocol_dot_chat__service__pb2.EmptyRequest.SerializeToString,
             protocol_dot_chat__service__pb2.ClusterInfoResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetFullSnapshot(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ChatService/GetFullSnapshot',
+            protocol_dot_chat__service__pb2.EmptyRequest.SerializeToString,
+            protocol_dot_chat__service__pb2.FullSnapshot.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AddReplica(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/ChatService/AddReplica',
+            protocol_dot_chat__service__pb2.AddReplicaRequest.SerializeToString,
+            protocol_dot_chat__service__pb2.AddReplicaResponse.FromString,
             options,
             channel_credentials,
             insecure,

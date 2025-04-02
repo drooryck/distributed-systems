@@ -20,15 +20,13 @@ HEARTBEAT_INTERVAL_SECS = 2.0
 LEADER_TIMEOUT_SECS     = 6.0  # If we don't hear from the leader for this many seconds, we attempt election
 
 class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
-    def __init__(self, db, logged_in_users, server_id, port, peers):
+    def __init__(self, db, server_id, port, peers):
         """
         :param db: Database instance
-        :param logged_in_users: Manager dict for {auth_token -> username}
         :param server_id: unique integer ID for this server
         :param peers: list of (peer_id, peer_address) for all servers in the cluster (including self)
         """
         self.db = db
-        self.logged_in_users = logged_in_users
         self.server_id = server_id
         self.my_addr = f"127.0.0.1:{port}"
 
@@ -39,7 +37,6 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             self.peers[pid] = addr
         print(self.peers)
 
-        self.last_alive_peers = {}
 
         # For leader election
         # This node starts as a follower, not a leader
@@ -52,6 +49,86 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
         # Start background thread to manage heartbeats & leader detection
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_manager, daemon=True)
         self.heartbeat_thread.start()
+
+
+    ### JOIN THE CLUSTER HELPER
+
+    def join_cluster_if_needed(self):
+        """
+        A minimal function that attempts to find the cluster leader among self.peers
+        and then calls AddReplica on that leader, applying the returned snapshot.
+        It adds the data whether or not the server that we are joining has a db with data.
+        """
+
+        # 1) Find leader among known peers, by trying everyone we got as argument and breaking
+        #   if we find a valid leader.
+        leader_id = None
+        leader_addr = None
+
+        for pid, addr in self.peers.items():
+            if pid == self.server_id:
+                continue
+            try:
+                channel = grpc.insecure_channel(addr)
+                stub = chat_service_pb2_grpc.ChatServiceStub(channel)
+                resp = stub.ClusterInfo(chat_service_pb2.EmptyRequest())
+
+                # only when we query the leader and the leader says itself is the leader!
+                # most robust option
+                if resp.status == "ok" and resp.leader.server_id == pid:
+                    leader_id = pid
+                    leader_addr = addr
+                    print(f"[Server {self.server_id}] Found leader {leader_id} at {leader_addr}")
+                    break
+            except Exception as e:
+                print(f"[Server {self.server_id}] Error querying {pid}: {e}")
+                pass
+
+        # 2) If no leader found, bail out
+        if not leader_addr:
+            print(f"[Server {self.server_id}] No leader found — maybe I'm alone or can't connect.")
+            return
+
+        # 3) Call AddReplica on the leader
+        print(f"[Server {self.server_id}] Attempting AddReplica on {leader_id} @ {leader_addr}")
+        channel = grpc.insecure_channel(leader_addr)
+        stub = chat_service_pb2_grpc.ChatServiceStub(channel)
+        req = chat_service_pb2.AddReplicaRequest(new_server_id=self.server_id, new_server_address=self.my_addr)
+        try:
+            resp = stub.AddReplica(req, timeout=3.0)
+            if resp.status == "ok":
+                print(f"[Server {self.server_id}] AddReplica succeeded. Now adding snapshot")
+                # 4) Apply the snapshot
+                self.apply_snapshot(resp.snapshot)
+                # 5) Update local peer list with the new replica
+                for server in resp.peers:
+                    self.peers[server.server_id] = server.address
+                print(f"[Server {self.server_id}] Now sees peers: {self.peers}")
+            else:
+                print(f"[Server {self.server_id}] AddReplica error: {resp.msg}")
+        except Exception as e:
+            print(f"[Server {self.server_id}] Error calling AddReplica on leader: {e}")
+
+    # this is the one helper to join the cluster.
+    def apply_snapshot(self, snapshot):
+        """
+        Wipes local DB and replaces it with the data in 'snapshot'.
+        """
+        self.db.execute("DROP TABLE IF EXISTS users", commit=True)
+        self.db.execute("DROP TABLE IF EXISTS messages", commit=True)
+        self.db.execute("DROP TABLE IF EXISTS sessions", commit=True)
+        self.db._init_db()
+
+        for user in snapshot.users:
+            self.db.execute( "INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)", (user.id, user.username, user.password_hash), commit=True)
+
+        for msg in snapshot.messages:
+            self.db.execute("INSERT INTO messages (id, sender, recipient, content, to_deliver) VALUES (?, ?, ?, ?, ?)", (msg.id, msg.sender, msg.recipient, msg.content, 1 if msg.to_deliver else 0), commit=True )
+
+        for sess in snapshot.sessions:
+            self.db.execute( "INSERT INTO sessions (auth_token, username) VALUES (?, ?)", (sess.auth_token, sess.username), commit=True)
+
+        print(f"[Server {self.server_id}] Snapshot applied successfully. Including the leader's peer list")
 
     def _heartbeat_manager(self):
         """
@@ -79,7 +156,8 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
                         stub.Heartbeat(req, timeout=1.0)
                     except:
                         # peer might be down or unreachable; ignore for now
-                        print('[Server {self.server_id}] Failed to send heartbeat to {pid}. Peer may be down or unreachable.')
+                        print(f'[Server {self.server_id}] Failed to send heartbeat to {pid}. Peer may be down or unreachable.')
+                        print(f"[Server {self.server_id}] Current peer list: {self.peers}")
                         pass
             else:
                 # I'm not leader. Check if I have heard from the current leader recently.
@@ -106,8 +184,6 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
                 alive_peers[pid] = paddr
             except:
                 pass
-
-        self.last_alive_peers = alive_peers
 
         # caused us a big headache
         # Do *not* overwrite self.peers here! We just use alive_peers for the election.
@@ -188,6 +264,10 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
                     req.message_ids.extend(kwargs["message_ids"])
                 if "auth_token" in kwargs:
                     req.auth_token = kwargs["auth_token"]
+                if "new_server_id" in kwargs:
+                    req.new_server_id = kwargs["new_server_id"] 
+                if "new_server_address" in kwargs:
+                    req.new_server_address = kwargs["new_server_address"]
 
                 stub.Replicate(req, timeout=2.0)
             except Exception as e:
@@ -261,9 +341,19 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             self.db._init_db()
             return chat_service_pb2.GenericResponse(status="ok", msg="Replicated DB reset")
 
-
+        elif op_type == "ADD_REPLICA":
+            new_id = request.new_server_id
+            new_addr = request.new_server_address
+            self.peers[new_id] = new_addr
+            print(f"[Server {self.server_id}] Received replication request to add server {new_id} at {new_addr} to peer list. Welcome")
+            return chat_service_pb2.AddReplicaResponse(status="ok", msg="Replicated add replica", )
+        
+        elif op_type == "DELETE_SESSION":
+            self.db.execute("DELETE FROM sessions WHERE auth_token=?", (request.auth_token,), commit=True)
+            return chat_service_pb2.GenericResponse(status="ok", msg="Replicated session deletion")
 
         return chat_service_pb2.GenericResponse(status="error", msg="Unknown replication op_type")
+
 
     # ----------------------------------------------------
     # RPC Implementations
@@ -378,8 +468,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
             return chat_service_pb2.GenericResponse(status="error", msg="Recipient not found")
         recipient = row[0][0]
         row = self.db.execute("SELECT username FROM sessions WHERE username=?", (request.recipient,), commit=True)
-        loggedin = row[0][0]
-        if loggedin:
+        if row:
             delivered_value = 1
         else:
             delivered_value = 0
@@ -583,39 +672,76 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
 
         return chat_service_pb2.GenericResponse(status="ok", msg="Database reset successfully")
     
+    
     def ClusterInfo(self, request, context):
         # Must be leader
         if not self.is_leader:
-            return chat_service_pb2.ClusterInfoResponse(
-                status="error",
-                msg="NOT_LEADER",
-                servers=[]
-            )
+            return chat_service_pb2.ClusterInfoResponse(status="error", msg="NOT_LEADER", servers=[])
 
-        # Validate session
-        row = self.db.execute(
-            "SELECT username FROM sessions WHERE auth_token=?",
-            (request.auth_token,),
-            commit=True
-        )
-        if not row:
-            return chat_service_pb2.ClusterInfoResponse(
-                status="error",
-                msg="Not logged in",
-                servers=[]
-            )
+        # does not need to have auth
 
         # Build list of known-alive peers from last election
         servers = []
-        for sid, addr in self.last_alive_peers.items():
+        for sid, addr in self.peers.items():
             sinfo = chat_service_pb2.ServerInfo(server_id=sid, address=addr)
             servers.append(sinfo)
 
-        return chat_service_pb2.ClusterInfoResponse(
-            status="ok",
-            msg=f"Current leader is {self.current_leader_id}",
-            servers=servers
-        )
+        # build leader info
+        if self.current_leader_id is None:
+            leader = chat_service_pb2.ServerInfo(server_id=-1, address="")
+            return chat_service_pb2.ClusterInfoResponse(status="error", msg="No known leader", servers=servers, leader=leader)
+        
+        leader = chat_service_pb2.ServerInfo(server_id=self.current_leader_id, address=self.peers.get(self.current_leader_id, ""))
+        return chat_service_pb2.ClusterInfoResponse(status="ok", msg="Success. There is a leader.", servers=servers, leader=leader)
+
+    
+    # add server node would be a better semantic term
+    def AddReplica(self, request, context):
+        if not self.is_leader:
+            return chat_service_pb2.AddReplicaResponse(status="error", msg="NOT_LEADER")
+        
+        new_id = request.new_server_id
+        new_addr = request.new_server_address
+
+        # Update local membership
+        self.peers[new_id] = new_addr
+        print(f"[Leader, {self.server_id}] Adding new server with ID {new_id} at address {new_addr} to peer list, asking others to follow")
+        # Replicate to followers
+        # We'll define an op_type="ADD_REPLICA"
+        self.replicate_to_peers("ADD_REPLICA", new_server_id=new_id, new_server_address=new_addr)
+        # maybe should check if it is still online here.
+
+        # GET FULL SNAPSHOT inline
+        # 2) Query DB for all data
+        user_rows = self.db.execute("SELECT id, username, password_hash FROM users")
+        msg_rows = self.db.execute("SELECT id, sender, recipient, content, to_deliver FROM messages")
+        session_rows = self.db.execute("SELECT auth_token, username FROM sessions")
+        snap = chat_service_pb2.FullSnapshot()
+
+        for (uid, uname, pwhash) in user_rows:
+            u = snap.users.add()
+            u.id = uid
+            u.username = uname
+            u.password_hash = pwhash  # if you replicate it
+        for (mid, sndr, rcpt, cont, deliver) in msg_rows:
+            m = snap.messages.add()
+            m.id = mid
+            m.sender = sndr
+            m.recipient = rcpt
+            m.content = cont
+            m.to_deliver = bool(deliver)  # or deliver > 0
+        for (atk, usr) in session_rows:
+            s = snap.sessions.add()
+            s.auth_token = atk
+            s.username   = usr
+
+        peer_list = []
+        for sid, addr in self.peers.items():
+            peer_list.append(chat_service_pb2.ServerInfo(server_id=sid, address=addr))
+
+            
+        return chat_service_pb2.AddReplicaResponse(status="ok", msg="Replica added, here is your snapshot",snapshot=snap, peers=peer_list)
+
 
 
 def serve():
@@ -640,17 +766,19 @@ def serve():
             peers.append((sid, address))
 
     db = Database(args.db_file)
-    # We use Manager dict for concurrency
-    logged_in_users = Manager().dict()
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    servicer = ChatServiceServicer(db, logged_in_users, args.server_id, args.port, peers)
+    servicer = ChatServiceServicer(db, args.server_id, args.port, peers)
     chat_service_pb2_grpc.add_ChatServiceServicer_to_server(servicer, server)
 
     listen_addr = f"[::]:{args.port}"
     server.add_insecure_port(listen_addr)
     print(f"Starting server {args.server_id} on port {args.port} with DB={args.db_file}")
     server.start()
+
+    time.sleep(3.0)
+    servicer.join_cluster_if_needed()
+
     server.wait_for_termination()
 
 if __name__ == "__main__":
