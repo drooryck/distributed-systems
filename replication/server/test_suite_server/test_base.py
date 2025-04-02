@@ -3,10 +3,10 @@ import grpc
 import sys, os
 
 # Ensure the correct import path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-import chat_service_pb2
-import chat_service_pb2_grpc
+from protocol import chat_service_pb2
+from protocol import chat_service_pb2_grpc
 
 SERVER_ADDRESS = "localhost:50051"
 
