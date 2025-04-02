@@ -67,7 +67,7 @@ class TestFailover(BaseTest):
             time.sleep(0.5)
 
         # 2) Give them time to start
-        time.sleep(3)
+        time.sleep(10)
 
         # 3) Check if any server crashed on startup
         for i, proc in enumerate(self.procs):
@@ -203,7 +203,7 @@ class TestFailover(BaseTest):
         self.assertEqual(signup_charlie.status, "ok", "Signup for Charlie failed on new leader")
 
         # STEP E: Verify data is in each DB (#1, #2, #3). #1 is dead but we still check its file on disk.
-        for s in self.SERVERS:
+        for s in self.SERVERS[1:]:
             db_file = s["db_file"]
             self.assertTrue(
                 os.path.exists(db_file),

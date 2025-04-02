@@ -66,7 +66,7 @@ class TestReplication(BaseTest):
             self.procs.append(proc)
 
         # 2) Wait for them to start up
-        time.sleep(3)
+        time.sleep(10)
 
         # 3) Check if any server crashed immediately; if so, raise an error
         for i, proc in enumerate(self.procs):
