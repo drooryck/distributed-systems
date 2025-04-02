@@ -1,5 +1,6 @@
 from test_base import BaseTest
-import chat_service_pb2
+from protocol import chat_service_pb2
+from protocol import chat_service_pb2_grpc
 
 class TestAuthenticationRequired(BaseTest):
     def test_fetch_messages_without_login(self):

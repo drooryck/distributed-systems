@@ -1,5 +1,6 @@
 from test_base import BaseTest
-import chat_service_pb2
+from protocol import chat_service_pb2
+from protocol import chat_service_pb2_grpc
 
 class TestSendMessage(BaseTest):
     def test_send_message(self):

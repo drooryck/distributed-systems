@@ -11,6 +11,9 @@ from test_8_logout_login import TestLogoutLogin
 from test_9_send_messsages_to_client import TestSendMessagesToClient
 from test_10_delete_account import TestDeleteAccount
 from test_11_list_accounts import TestListAccounts
+from test_12_persistence import TestPersistence
+from test_13_replication import TestReplication
+from test_14_failover import TestFailover
 
 
 if __name__ == "__main__":
@@ -27,5 +30,8 @@ if __name__ == "__main__":
             unittest.defaultTestLoader.loadTestsFromTestCase(TestSendMessagesToClient),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestDeleteAccount),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestListAccounts),
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestPersistence),
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestReplication),
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestFailover),
         ])
     )

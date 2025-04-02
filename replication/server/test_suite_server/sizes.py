@@ -5,7 +5,7 @@ import sys, os
 # Add the parent directory to sys.path to import 'protocol'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from protocol.protocol import JSONProtocolHandler, CustomProtocolHandler, Message
+from protocol import JSONProtocolHandler, CustomProtocolHandler, Message
 
 # Flag to enable measurement mode
 MEASURE_INFO = True  # You can toggle this in protocol.py

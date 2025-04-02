@@ -1,5 +1,6 @@
 from test_base import BaseTest
-import chat_service_pb2
+from protocol import chat_service_pb2
+from protocol import chat_service_pb2_grpc
 
 class TestListAccounts(BaseTest):
     def test_list_accounts_basic(self):

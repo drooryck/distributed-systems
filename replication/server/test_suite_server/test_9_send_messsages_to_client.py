@@ -1,6 +1,8 @@
 import unittest
-import chat_service_pb2
 from test_base import BaseTest
+from protocol import chat_service_pb2
+from protocol import chat_service_pb2_grpc
+
 
 class TestSendMessagesToClient(BaseTest):
     def test_send_messages_to_client(self):
