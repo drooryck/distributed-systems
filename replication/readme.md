@@ -9,7 +9,7 @@
 
 #### 🧪 Example Flow
 
-1. Start up a few servers:
+1. Start up a few servers, ideally waiting until you see the logs recognizing the leader:
    ```bash
    make run-server SERVER_ARGS="--server_id 1 --port 5001 --db_file=test_suite_server/test_chat1.db"
    make run-server SERVER_ARGS="--server_id 2 --port 5002 --db_file=test_suite_server/test_chat2.db --peers 1:127.0.0.1:5001"
