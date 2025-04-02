@@ -1,64 +1,70 @@
-## JoChat  
-JoChat is a distributed messaging system that supports user authentication, message delivery, and account management.
+  ## JoChat  
+  JoChat is a distributed messaging system that supports user authentication, message delivery, and account management.
 
-This version of JoChat works with gRPC, so no longer a need to specify a messaging protocol.
+  This version of JoChat works with gRPC, so no longer a need to specify a messaging protocol.
 
-## Quick Setup & Deployment  
-To set up and run JoChat, follow these steps in a **fresh virtual environment** (for the love of that which is holy):
-You can find your local network's ip address by doing ifconfig. Get
-```
-pip install -r requirements.txt
-make run-server  SERVER_ARGS=" # (optional arguments: --host 0.0.0.0 --port 5000)`` "
-make run-client  CLIENT_ARGS = " # (optional arguments: --host 0.0.0.0 --port 5000)`` " 
-```
+  ## Quick Example Flow & Deployment  
+  To set up and run JoChat, follow these steps in a **fresh virtual environment** (for the love of that which is holy):
 
-An example:
-```
-make run-client CLIENT_ARGS="--ip 0.0.0.1"
-make run-server SERVER_ARGS="--port 5001"
-or simply
-make run-all SERVER_ARGS="--port 5001" CLIENT_ARGS=""
-```
 
-If you are confused, run
-```
-make run-server SERVER_ARGS="--help"
-```
+#### 🧪 Example Flow
 
-This will spin up a **Streamlit web application**, allowing you to:  
-- Sign up and log in  
-- See the number of unread messages while you were away  
-- Send messages to other users  
-- List accounts matching a wildcard pattern (with pagination)  
-- Delete your account  
-- Log out  
+1. Start up a few servers:
+   ```bash
+   make run-server SERVER_ARGS="--server_id 1 --port 5001"
+   make run-server SERVER_ARGS="--server_id 2 --port 5002 --peers 1:127.0.0.1:5001"
+   make run-server SERVER_ARGS="--server_id 3 --port 5003 --peers 1:127.0.0.1:5001,2:127.0.0.1:5002"
+2. Start a client:
+   ```bash
+   make run-client CLIENT_ARGS="--servers 127.0.0.1:5001,127.0.0.1:5002,127.0.0.1:5003"
+3. Kill the leader (control c in the respective terminals)
+   - The followers will detect the failure and hold an election. The client will detect the new leader via retry and keep working without any user intervention.
 
-## 📂 Project Directory Structure 
-``` 
-messaging-app/
-│── client/                        # Client-side implementation
-│   │── client.py                   # Main client script
-│   │── test_suite_client/           # Test suite for client-side functionality
-│── protocol/                        # Protocol implementation
-│   │── chat_service.proto           # gRPC protocol, message definitions.
-│── server/                        # Server-side implementation
-│   │── server.py                   # Main server script
-│   │── database.py                  # Database interaction functions
-│   │── chat.db                      # SQLite database for storing users and messages
-│   │── chat.db-journal              # SQLite journal file for database transactions
-│   │── test_suite_server/           # Test suite for server-side functionality
-│   │── test_int_grpc_sizes.py       # Integration test for gRPC message sizes
-│── Makefile                        # Automation for running server, client, and tests
-│── readme.md                       # Project documentation
-│── requirements.txt                 # Dependencies required for the project
-```
 
-## Code Documentation
+
+
+  ## 📂 Project Directory Structure 
+  ``` 
+  messaging-app/
+  │── client/                        # Client-side implementation
+  │   │── client.py                   # Main client script
+  │   │── test_suite_client/           # Test suite for client-side functionality
+  │── protocol/                        # Protocol implementation
+  │   │── chat_service.proto           # gRPC protocol, message definitions.
+  │── server/                        # Server-side implementation
+  │   │── server.py                   # Main server script
+  │   │── database.py                  # Database interaction functions
+  │   │── chat1.db                      # SQLite database for storing users and messages in server 1 (process 1)
+  │   │── chat2.db                      # SQLite database for storing users and messages in server 2 (process 2)
+  │   │── test_suite_server/           # Test suite for server-side functionality
+  │   │── test_int_grpc_sizes.py       # Integration test for gRPC message sizes
+  │── Makefile                        # Automation for running server, client, and tests
+  │── readme.md                       # Project documentation
+  │── requirements.txt                 # Dependencies required for the project
+  ```
+
+  ## Code Documentation
+
+  ### The Cluster
+- **Decentralized Peer-to-Peer Servers**
+Each server starts independently and is given a list of peers via command-line arguments. When a new server joins, it queries the leader, which at the least must be provided as a peer to discover the current leader and synchronizes its state by requesting a full database snapshot via the AddReplica RPC, it also receives all peers active in the cluster visible to the leader.
+
+- **Leader Election (Lowest-ID Wins)**
+Servers monitor **heartbeats** from the leader. If no heartbeat is received within a timeout window (LEADER_TIMEOUT_SECS), an election is triggered. The server with the **lowest ID among reachable peers** becomes the new leader. Each node does this process independently, and agrees on the new leader among them. A small ping is sent by a node to see who is reachable at election time.
+
+- **Replication**
+When the leader handles a write (e.g., sign-up, send message, logout), it propagates that action to all followers using gRPC Replicate calls. These operations are encoded as typed replication requests and include payloads like message contents or session tokens.
+
+- **Snapshot-Based Rejoin**
+New replicas receive a full snapshot of the leader’s database on join — including users, messages, and sessions — and then are added to the leader’s peer list, becoming full cluster members. This allows for any new node to join the cluster, and is also how we start up the first three servers.
+
+- **Client-Side Failover Logic**
+The ChatServerClient class in client.py manages a list of server addresses. It automatically detects when a server is unreachable or refuses writes due to not being the leader, and transparently retries requests on the next server in the list. It can also call ClusterInfo to refresh its view of the current cluster. It polls and does this within a timeout window (10 seconds by default). Implemented as its own class so that the client itself and the user itself does not have to do anything to do with the switch but can just naively call RPC requests. The ChatServerClient handles the connection with the Cluster.
+
 
 ### The Server
 The server is the **backbone** of JoChat.
 
-- Uses **sockets** to allow multiple clients to communicate concurrently.
 - Stores user accounts and messages in **SQLite (`chat.db`)**, keeping track of:
   - **Sender**
   - **Recipient**
@@ -69,8 +75,9 @@ The server is the **backbone** of JoChat.
 - The server processes actions using one thread per action it does at a time.
 - **Concurrency control:** Implements a **coarse-grained locking mechanism**, where basically a server can handle requests in any order it wants.
 - **Security:** Passwords are **hashed using SHA-256** before transmission on the client side. Clients are responsible for hashing their passwords.
-### The Client 
+  
 
+### The Client 
 The client side is handled entirely with the file `client.py` with modular design and a clean interface, with ChatServerClient and StreamlitChatApp classes (the former handling server connection behavior and the latter handling the Streamlit UI for a pleasant and aesthetic user experience).  Ultimately, the client is responsible for:
 
 - **User Interface**: Providing a user-friendly interface for users to interact with the server.
@@ -129,6 +136,10 @@ Easy as pie.
   - Connection handling  
   - Sending and receiving messages  
   - UI interactions
+- **Cluster Tests (`test_suite_server/`)**
+  - Persistence of messages when killing random servers and starting them back up.
+  - Replication: Starting up servers and mimicking traffic and checking the storage of the other servers.
+  - Failover: Killing a server that has had a lot of traffic and making sure the user seamlesly can use another node in the cluster.
 
 Happy messaging on JoChat.
 Dries and Jo.
