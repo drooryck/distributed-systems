@@ -4,6 +4,7 @@ import time
 import sqlite3
 import os
 import sys
+import psutil
 import grpc
 
 from test_base import BaseTest
@@ -12,6 +13,26 @@ from protocol import chat_service_pb2_grpc
 
 
 SERVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py")
+
+def kill_all_chat_servers():
+    """
+    This kills any 'python server.py' processes still running from previous tests.
+    Requires 'pip install psutil'.
+    """
+    if not psutil:
+        print("psutil not available; skipping leftover process cleanup.")
+        return
+
+    for proc in psutil.process_iter(attrs=["pid", "cmdline"]):
+        cmdline = proc.info["cmdline"]
+        if cmdline and "server.py" in " ".join(cmdline):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                proc.kill()
+            except Exception as e:
+                print(f"Warning: Could not terminate leftover server {proc.pid}: {e}")
 
 def start_server(server_id, port, db_file, peers):
     """
@@ -54,6 +75,7 @@ class TestReplication(BaseTest):
     ]
 
     def setUp(self):
+        kill_all_chat_servers()
         # 1) Start all servers
         self.procs = []
         for cfg in self.SERVERS:
@@ -66,7 +88,7 @@ class TestReplication(BaseTest):
             self.procs.append(proc)
 
         # 2) Wait for them to start up
-        time.sleep(10)
+        time.sleep(7)
 
         # 3) Check if any server crashed immediately; if so, raise an error
         for i, proc in enumerate(self.procs):

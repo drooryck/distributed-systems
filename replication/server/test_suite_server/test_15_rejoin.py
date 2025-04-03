@@ -4,6 +4,7 @@ import time
 import sqlite3
 import os
 import grpc
+import psutil
 
 from test_base import BaseTest  # or adapt to your environment
 from protocol import chat_service_pb2
@@ -24,6 +25,26 @@ def start_server(server_id, port, db_file, peers):
         f"--peers={peers}"
     ]
     return subprocess.Popen(cmd, stdout=None, stderr=None)
+
+def kill_all_chat_servers():
+    """
+    This kills any 'python server.py' processes still running from previous tests.
+    Requires 'pip install psutil'.
+    """
+    if not psutil:
+        print("psutil not available; skipping leftover process cleanup.")
+        return
+
+    for proc in psutil.process_iter(attrs=["pid", "cmdline"]):
+        cmdline = proc.info["cmdline"]
+        if cmdline and "server.py" in " ".join(cmdline):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                proc.kill()
+            except Exception as e:
+                print(f"Warning: Could not terminate leftover server {proc.pid}: {e}")
 
 
 class TestRejoin(BaseTest):
@@ -65,6 +86,7 @@ class TestRejoin(BaseTest):
     }
 
     def setUp(self):
+        kill_all_chat_servers()
         # 1) Start the original 3-server cluster
         self.procs = []
         for cfg in self.SERVERS_3:
@@ -109,17 +131,23 @@ class TestRejoin(BaseTest):
         time.sleep(2)  # Let reset replicate
 
     def tearDown(self):
-        # Ensure all processes are terminated, no matter what.
-        for p in self.procs:
+        # Terminate all running servers, even if one of them failed earlier
+        for i, p in enumerate(self.procs):
             if p is not None:
-                p.terminate()
-                p.wait()
-        # Close any channels
-        self.leader_channel.close()
+                try:
+                    p.terminate()
+                    p.wait(timeout=5)
+                except Exception as e:
+                    print(f"Warning: Failed to cleanly terminate server {i+1}: {e}")
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+        self.procs.clear()
 
-        # Optionally, remove the new server's DB file after the test
-        # if os.path.exists(self.NEW_SERVER["db_file"]):
-        #     os.remove(self.NEW_SERVER["db_file"])
+        # Close any open gRPC channel
+        if hasattr(self, "leader_channel"):
+            self.leader_channel.close()
 
     def query_db(self, db_file, query, params=()):
         """
