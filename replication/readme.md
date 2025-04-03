@@ -11,9 +11,11 @@
 
 1. Start up a few servers, ideally waiting until you see the logs recognizing the leader:
    ```bash
-   make run-server SERVER_ARGS="--server_id 1 --port 5001 --db_file=test_suite_server/test_chat1.db"
-   make run-server SERVER_ARGS="--server_id 2 --port 5002 --db_file=test_suite_server/test_chat2.db --peers 1:127.0.0.1:5001"
-   make run-server SERVER_ARGS="--server_id 3 --port 5003 --db_file=test_suite_server/test_chat3.db --peers 1:127.0.0.1:5001,2:127.0.0.1:5002"
+
+   python server.py --server_id=1 --host="10.250.25.214" --port=50051 --db_file=chat1.db --peers="1:10.250.25.214:50051"
+   python server.py --server_id=2 --host="10.250.25.214" --port=50052 --db_file=chat2.db --peers="1:10.250.25.214:50051"
+   python server.py --server_id=3 --host="10.250.25.214" --port=50053 --db_file=chat3.db --peers="1:10.250.25.214:50051,2:10.250.25.214:50052"
+
 2. Start a client:
    ```bash
    make run-client CLIENT_ARGS="--servers 127.0.0.1:5001,127.0.0.1:5002,127.0.0.1:5003"

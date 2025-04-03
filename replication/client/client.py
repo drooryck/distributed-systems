@@ -471,7 +471,7 @@ class StreamlitChatApp:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JoChat Client (Automatic Failover with Server List)")
-    parser.add_argument("--servers", type=str, default="127.0.0.1:50051,127.0.0.1:50052,127.0.0.1:50053",
+    parser.add_argument("--servers", type=str, default="10.250.25.214:50051,10.250.25.214:50052,10.250.25.214:50053",
                         help="Comma-separated list of server addresses")
     args = parser.parse_args()
 

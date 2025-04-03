@@ -20,7 +20,7 @@ HEARTBEAT_INTERVAL_SECS = 2.0
 LEADER_TIMEOUT_SECS     = 6.0  # If we don't hear from the leader for this many seconds, we attempt election
 
 class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
-    def __init__(self, db, server_id, port, peers):
+    def __init__(self, db, server_id, host, port, peers):
         """
         :param db: Database instance
         :param server_id: unique integer ID for this server
@@ -28,8 +28,7 @@ class ChatServiceServicer(chat_service_pb2_grpc.ChatServiceServicer):
         """
         self.db = db
         self.server_id = server_id
-        self.my_addr = f"127.0.0.1:{port}"
-
+        self.my_addr = f"{host}:{port}"
 
         # Dictionary: peer_id -> peer_address
         self.peers = {server_id: self.my_addr}
@@ -750,6 +749,7 @@ def serve():
     parser.add_argument("--port", type=int, default=50051, help="Port to listen on")
     parser.add_argument("--db_file", type=str, default="chat.db", help="SQLite DB file name")
     parser.add_argument("--peers", type=str, default="", help="Comma-separated list of peer definitions, e.g. '1:127.0.0.1:50051,2:127.0.0.1:50052'")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP to use (default: 127.0.0.1)")
     args = parser.parse_args()
     
 
@@ -768,7 +768,7 @@ def serve():
     db = Database(args.db_file)
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    servicer = ChatServiceServicer(db, args.server_id, args.port, peers)
+    servicer = ChatServiceServicer(db, args.server_id, args.host, args.port, peers)
     chat_service_pb2_grpc.add_ChatServiceServicer_to_server(servicer, server)
 
     listen_addr = f"[::]:{args.port}"
