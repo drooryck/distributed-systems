@@ -7,14 +7,14 @@ import streamlit as st
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from client import ChatServerClient
-import chat_service_pb2
+from protocol import chat_service_pb2
 
 class TestOfflineMessageFetch(unittest.TestCase):
     """Test manual fetching of offline messages."""
 
     def setUp(self):
         """Set up a ChatServerClient instance."""
-        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+        self.client = ChatServerClient(["127.0.0.1:50051", "127.0.0.1:50052", "127.0.0.1:50053"])
 
     @patch("client.chat_service_pb2_grpc.ChatServiceStub")
     def test_manual_fetch_offline_messages(self, mock_stub_class):

@@ -11,14 +11,14 @@ warnings.filterwarnings("ignore", message="Session state does not function when 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from client import ChatServerClient
-import chat_service_pb2
+from protocol import chat_service_pb2
 
 class TestSendMessage(unittest.TestCase):
     """Test sending messages with gRPC stub."""
 
     def setUp(self):
         """Setup a mock gRPC stub for testing."""
-        self.client = ChatServerClient(server_host="127.0.0.1", server_port=50051)
+        self.client = ChatServerClient(["127.0.0.1:50051", "127.0.0.1:50052", "127.0.0.1:50053"])
 
     @patch("client.chat_service_pb2_grpc.ChatServiceStub")
     def test_successful_message_send(self, mock_stub_class):

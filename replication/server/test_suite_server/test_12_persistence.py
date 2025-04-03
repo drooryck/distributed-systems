@@ -54,7 +54,7 @@ class TestPersistence(BaseTest):
             self.procs.append(proc)
         
         # Wait a few seconds for servers to start.
-        time.sleep(3)
+        time.sleep(10)
         
         # Connect to leader (assumed on port 50051) and reset DB.
         self.leader_channel = grpc.insecure_channel("localhost:50051")
