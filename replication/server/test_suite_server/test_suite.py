@@ -14,6 +14,7 @@ from test_11_list_accounts import TestListAccounts
 from test_12_persistence import TestPersistence
 from test_13_replication import TestReplication
 from test_14_failover import TestFailover
+from test_15_rejoin import TestRejoin
 
 
 if __name__ == "__main__":
@@ -33,5 +34,6 @@ if __name__ == "__main__":
             unittest.defaultTestLoader.loadTestsFromTestCase(TestPersistence),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestReplication),
             unittest.defaultTestLoader.loadTestsFromTestCase(TestFailover),
+            unittest.defaultTestLoader.loadTestsFromTestCase(TestRejoin),
         ])
     )

@@ -4,6 +4,7 @@ import time
 import sqlite3
 import os
 import grpc
+import psutil
 from test_base import BaseTest
 from protocol import chat_service_pb2
 from protocol import chat_service_pb2_grpc
@@ -27,6 +28,26 @@ def query_db(db_file, query, params=()):
     conn.close()
     return results
 
+def kill_all_chat_servers():
+    """
+    This kills any 'python server.py' processes still running from previous tests.
+    Requires 'pip install psutil'.
+    """
+    if not psutil:
+        print("psutil not available; skipping leftover process cleanup.")
+        return
+
+    for proc in psutil.process_iter(attrs=["pid", "cmdline"]):
+        cmdline = proc.info["cmdline"]
+        if cmdline and "server.py" in " ".join(cmdline):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                proc.kill()
+            except Exception as e:
+                print(f"Warning: Could not terminate leftover server {proc.pid}: {e}")
+
 class TestPersistence(BaseTest):
     """
     Persistence Test:
@@ -42,6 +63,7 @@ class TestPersistence(BaseTest):
     ]
     
     def setUp(self):
+        kill_all_chat_servers()
         # Start all server processes without deleting the DB files.
         self.procs = []
         for s in self.SERVERS:
@@ -54,7 +76,7 @@ class TestPersistence(BaseTest):
             self.procs.append(proc)
         
         # Wait a few seconds for servers to start.
-        time.sleep(10)
+        time.sleep(7)
         
         # Connect to leader (assumed on port 50051) and reset DB.
         self.leader_channel = grpc.insecure_channel("localhost:50051")

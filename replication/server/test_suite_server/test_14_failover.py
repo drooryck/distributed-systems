@@ -3,6 +3,7 @@ import subprocess
 import time
 import sqlite3
 import os
+import psutil
 import grpc
 
 from test_base import BaseTest  # or adapt as needed
@@ -10,7 +11,6 @@ from protocol import chat_service_pb2
 from protocol import chat_service_pb2_grpc
 
 SERVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "server.py")
-
 
 def start_server(server_id, port, db_file, peers):
     """
@@ -25,11 +25,29 @@ def start_server(server_id, port, db_file, peers):
     ]
     return subprocess.Popen(cmd, stdout=None, stderr=None)
 
-
-class TestFailover(BaseTest):
+def kill_all_chat_servers():
     """
-    Tests failover by killing the initial leader (server #1) and ensuring a new leader
-    is elected so that the cluster remains operational.
+    This kills any 'python server.py' processes still running from previous tests.
+    Requires 'pip install psutil'.
+    """
+    for proc in psutil.process_iter(attrs=["pid", "cmdline"]):
+        cmdline = proc.info["cmdline"]
+        if cmdline and "server.py" in " ".join(cmdline):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                proc.kill()
+            except Exception as e:
+                print(f"Warning: Could not terminate leftover server {proc.pid}: {e}")
+
+
+class TestDoubleFailover(BaseTest):
+    """
+    Demonstrates killing two consecutive leaders in a 3-server cluster.
+    1) Kills original leader (#1).
+    2) Finds new leader (#2 or #3), kills it.
+    3) Ensures the last server (#2 or #3) still has the data.
     """
 
     SERVERS = [
@@ -54,7 +72,9 @@ class TestFailover(BaseTest):
     ]
 
     def setUp(self):
-        # 1) Start all servers.
+        kill_all_chat_servers()
+
+        # Launch all 3 servers
         self.procs = []
         for cfg in self.SERVERS:
             p = start_server(
@@ -64,48 +84,46 @@ class TestFailover(BaseTest):
                 cfg["peers"]
             )
             self.procs.append(p)
-            time.sleep(0.5)
+            time.sleep(0.1)
 
-        # 2) Give them time to start
-        time.sleep(10)
+        time.sleep(7)  # Let them start up
 
-        # 3) Check if any server crashed on startup
+        # Verify none crashed on startup
         for i, proc in enumerate(self.procs):
             ret = proc.poll()
             if ret is not None:
                 raise RuntimeError(
-                    f"Server {self.SERVERS[i]['server_id']} crashed immediately "
-                    f"with exit code: {ret}."
+                    f"Server {self.SERVERS[i]['server_id']} crashed on startup (exit code={ret})."
                 )
 
-        # 4) Connect to the assumed leader (server #1) and reset the DB
+        # Connect to original leader (#1) on port 50051, reset DB
         self.leader_channel = grpc.insecure_channel("localhost:50051")
         self.leader_stub = chat_service_pb2_grpc.ChatServiceStub(self.leader_channel)
 
-        # Sign up / login admin
+        # Create admin, reset DB
         self.leader_stub.Signup(chat_service_pb2.SignupRequest(username="admin", password="adminpass"))
         admin_login = self.leader_stub.Login(chat_service_pb2.LoginRequest(username="admin", password="adminpass"))
         if admin_login.status != "ok":
-            raise RuntimeError("Admin login failed; cannot reset DB")
+            raise RuntimeError("Could not login as admin on server #1")
 
-        # Reset DB
         self.leader_stub.ResetDB(
             chat_service_pb2.EmptyRequest(auth_token=admin_login.auth_token)
         )
         time.sleep(2)  # Let reset replicate
 
     def tearDown(self):
-        # Ensure all processes are terminated, no matter what.
+        # Terminate all server processes
         for p in self.procs:
             if p is not None:
                 p.terminate()
                 p.wait()
-        # Close any channels
+
+        # Close leader channel
         self.leader_channel.close()
 
     def query_db(self, db_file, query, params=()):
         """
-        Helper to run a query on the local SQLite DB file.
+        Helper to query local DB for final checks.
         """
         conn = sqlite3.connect(db_file)
         cur = conn.cursor()
@@ -114,124 +132,116 @@ class TestFailover(BaseTest):
         conn.close()
         return rows
 
-    def find_new_leader_stub(self, dead_server_ids=None, timeout_secs=10):
+    def find_leader_stub(self, dead_ids=None, timeout_secs=10):
         """
-        Polls each *live* server's ClusterInfo() endpoint to see who returns status="ok".
-        That server is the leader, since the ClusterInfo() RPC is coded to return "NOT_LEADER"
-        from followers.
-
-        :param dead_server_ids: list of server_ids we know are dead or intentionally killed
-                                (we skip them).
-        :param timeout_secs: how many seconds to wait for a new leader to emerge.
-
-        :return: (stub, channel) for the newly discovered leader
-        :raises: RuntimeError if no leader is found within the timeout.
+        Return a stub to whichever server is currently the leader,
+        skipping any known-dead server IDs.
         """
-        if dead_server_ids is None:
-            dead_server_ids = []
-
-        start_time = time.time()
-        while (time.time() - start_time) < timeout_secs:
+        if dead_ids is None:
+            dead_ids = []
+        start = time.time()
+        while time.time() - start < timeout_secs:
             for s in self.SERVERS:
-                server_id = s["server_id"]
-                if server_id in dead_server_ids:
-                    continue  # skip known-dead servers
-
-                addr = f"localhost:{s['port']}"
-                channel = grpc.insecure_channel(addr)
+                if s["server_id"] in dead_ids:
+                    continue
+                channel = grpc.insecure_channel(f"localhost:{s['port']}")
                 stub = chat_service_pb2_grpc.ChatServiceStub(channel)
-
                 try:
-                    # 'ClusterInfo' returns status="ok" if and only if that server is leader
                     resp = stub.ClusterInfo(chat_service_pb2.EmptyRequest(), timeout=1.0)
-                    if resp.status == "ok":
-                        # We found the new leader, return it
-                        return stub, channel
-                    # If it returned status="error", it's a follower or there's no leader yet
-                except Exception:
-                    # Possibly can't connect or times out if server isn't responding
+                    if resp.status == "ok":  # This node claims it is leader
+                        return stub, channel, s["server_id"]
+                except:
                     pass
-
             time.sleep(1)
 
-        raise RuntimeError(f"No new leader found within {timeout_secs} seconds.")
+        raise RuntimeError("No leader found within timeout")
 
-    def test_leader_failover(self):
-        # STEP A: Perform some writes on the original leader (#1).
-        # 1) Create Alice
-        signup_alice = self.leader_stub.Signup(
-            chat_service_pb2.SignupRequest(username="Alice", password="alicepass")
-        )
-        self.assertEqual(signup_alice.status, "ok", "Signup for Alice failed on original leader")
-
-        # 2) Create Bob (so that sending him a message is valid)
-        signup_bob = self.leader_stub.Signup(
-            chat_service_pb2.SignupRequest(username="Bob", password="bobpass")
-        )
-        self.assertEqual(signup_bob.status, "ok", "Signup for Bob failed on original leader")
-
-        # 3) Alice logs in and sends Bob a message
-        login_alice = self.leader_stub.Login(
-            chat_service_pb2.LoginRequest(username="Alice", password="alicepass")
-        )
-        self.assertEqual(login_alice.status, "ok", "Login for Alice failed on original leader")
+    def test_double_leader_failover(self):
+        ### Step A: Original cluster with leader #1
+        # Sign up Alice, Bob, Alice -> Bob message
+        self.leader_stub.Signup(chat_service_pb2.SignupRequest(username="Alice", password="alicepass"))
+        self.leader_stub.Signup(chat_service_pb2.SignupRequest(username="Bob", password="bobpass"))
+        login_alice = self.leader_stub.Login(chat_service_pb2.LoginRequest(username="Alice", password="alicepass"))
+        self.assertEqual(login_alice.status, "ok", "Failed to log in Alice on server #1")
         token_alice = login_alice.auth_token
-
         send_resp = self.leader_stub.SendMessage(
             chat_service_pb2.SendMessageRequest(
                 auth_token=token_alice,
                 recipient="Bob",
-                content="Failover test message"
+                content="Double-failover test message"
             )
         )
-        self.assertEqual(send_resp.status, "ok", "SendMessage failed on original leader")
-        time.sleep(2)  # let replication occur
+        self.assertEqual(send_resp.status, "ok")
 
-        # STEP B: Kill the original leader (server #1).
+        time.sleep(2)  # replicate
+
+        ### Step B: Kill leader #1
         self.procs[0].terminate()
         self.procs[0].wait()
-        self.procs[0] = None  # Mark that we've killed it.
+        self.procs[0] = None
+        dead_ids = [1]
 
-        # STEP C: Wait for a new leader to be elected.
-        new_leader_stub, new_leader_channel = self.find_new_leader_stub()
+        ### Step C: find new leader among #2, #3
+        new_stub, new_channel, new_leader_id = self.find_leader_stub(dead_ids=dead_ids)
+        # sign up "Charlie"
+        signup_charlie = new_stub.Signup(chat_service_pb2.SignupRequest(username="Charlie", password="charliepass"))
+        self.assertEqual(signup_charlie.status, "ok", "Failed to sign up Charlie on new leader")
 
-        # STEP D: Perform some writes on the new leader.
-        # Let's sign up "Charlie"
-        signup_charlie = new_leader_stub.Signup(
-            chat_service_pb2.SignupRequest(username="Charlie", password="charliepass")
-        )
-        self.assertEqual(signup_charlie.status, "ok", "Signup for Charlie failed on new leader")
+        time.sleep(2)
 
-        # STEP E: Verify data is in each DB (#1, #2, #3). #1 is dead but we still check its file on disk.
-        for s in self.SERVERS[1:]:
+        ### Step D: Kill second leader (the one we just found)
+        idx = next(i for i,srv in enumerate(self.SERVERS) if srv["server_id"] == new_leader_id)
+        self.procs[idx].terminate()
+        self.procs[idx].wait()
+        self.procs[idx] = None
+        dead_ids.append(new_leader_id)
+        new_channel.close()
+
+        ### Step E: Only one server left alive => that server must be leader
+        final_stub, final_channel, final_leader_id = self.find_leader_stub(dead_ids=dead_ids)
+        self.assertNotIn(final_leader_id, dead_ids, "The final leader is marked as dead? Logic error.")
+
+        # Step F: do final writes: sign up "Dave"
+        signup_dave = final_stub.Signup(chat_service_pb2.SignupRequest(username="Dave", password="davepass"))
+        self.assertEqual(signup_dave.status, "ok", "Failed to sign up Dave on final leader")
+
+        time.sleep(2)
+
+        # Step G: verify that the final server has Alice, Bob, Charlie, Dave
+        for s in self.SERVERS:
+            # skip dead servers
+            if s["server_id"] in dead_ids:
+                continue
             db_file = s["db_file"]
-            self.assertTrue(
-                os.path.exists(db_file),
-                f"DB file {db_file} does not exist"
-            )
+            # each live server is either the final node or a leftover follower (the latter shouldn’t happen with 2 kills)
+            # but let's just confirm we can query it, if it’s still around
 
-            # Check for "Alice"
+            # Confirm Alice
             row = self.query_db(db_file, "SELECT username FROM users WHERE username=?", ("Alice",))
-            self.assertTrue(len(row) > 0, f"Alice not found in {db_file}")
+            self.assertTrue(row, f"Alice missing in {db_file}")
 
-            # Check for "Bob"
+            # Confirm Bob
             row = self.query_db(db_file, "SELECT username FROM users WHERE username=?", ("Bob",))
-            self.assertTrue(len(row) > 0, f"Bob not found in {db_file}")
+            self.assertTrue(row, f"Bob missing in {db_file}")
 
-            # Check for the message from Alice to Bob
-            msg_rows = self.query_db(
+            # Confirm the message from Alice->Bob
+            msgs = self.query_db(
                 db_file,
-                "SELECT sender, recipient, content FROM messages WHERE sender='Alice' AND recipient='Bob'"
+                "SELECT content FROM messages WHERE sender='Alice' AND recipient='Bob'"
             )
-            self.assertTrue(len(msg_rows) > 0, f"No message from Alice->Bob found in {db_file}")
-            found = any("Failover test message" in row[2] for row in msg_rows)
-            self.assertTrue(found, f"Expected content not found in {db_file}")
+            self.assertTrue(msgs, f"No Alice->Bob messages in {db_file}")
+            self.assertTrue(any("Double-failover test message" in m[0] for m in msgs),
+                            f"Missing 'Double-failover test message' in {db_file}")
 
-            # Check that Charlie is recognized
+            # Confirm Charlie
             row = self.query_db(db_file, "SELECT username FROM users WHERE username=?", ("Charlie",))
-            self.assertTrue(len(row) > 0, f"Charlie not found in {db_file}")
+            self.assertTrue(row, f"Charlie missing in {db_file}")
 
-        new_leader_channel.close()
+            # Confirm Dave
+            row = self.query_db(db_file, "SELECT username FROM users WHERE username=?", ("Dave",))
+            self.assertTrue(row, f"Dave missing in {db_file}")
+
+        final_channel.close()
 
 
 if __name__ == "__main__":
