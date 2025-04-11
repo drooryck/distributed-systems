@@ -10,7 +10,8 @@ const {
   isValidMove,  // Make sure to export this from gameState.js
   getRandomTetromino,
   placeTetromino,
-  clearLines
+  clearLines,
+  createEmptyBoard
 } = require('./gameState');
 
 // Constants for game mechanics
@@ -102,10 +103,53 @@ function updateGameState() {
         player.isWaitingForNextPiece = false;
         console.log(`New piece spawned for player ${playerId}: ${player.currentPiece.type}`);
         
-        // Check for game over condition
+        // Update the game over handling in the updateGameState function
+        // In the updateGameState function
         if (!isValidMove(gameState.board, player.currentPiece, player.x, player.y)) {
           console.log(`Game over for player ${playerId}`);
-          resetPlayer(gameState, playerId);
+          
+          // Trigger game over state
+          gameState.appPhase = 'gameover';
+          
+          // Send game over notification
+          io.emit('gameOver', {
+            playerId: playerId,
+            score: player.score
+          });
+    
+          
+          // Set timeout to return to homescreen after 5 seconds
+          setTimeout(() => {
+            // Stop the game loop
+            clearInterval(gameLoop);
+            
+            // Reset game state
+            gameState.appPhase = 'homescreen';
+            gameState.readyPlayers = [];
+            gameState.board = createEmptyBoard(20, 10);
+            
+            // Reset all players
+            Object.keys(gameState.players).forEach(id => {
+              const p = gameState.players[id];
+              p.isReady = false;
+              p.isWaitingForNextPiece = false;
+              p.currentPiece = getRandomTetromino();
+              p.x = 4;
+              p.y = 0;
+              p.score = 0;
+            });
+            
+            // Emit updated state
+            io.emit('gameState', gameState);
+            
+            // Restart a simplified game loop for the homescreen
+            // This only sends updates but doesn't process game mechanics
+            gameLoop = setInterval(() => {
+              io.emit('gameState', gameState);
+            }, FRAME_DELAY);
+          }, 5000);
+          
+          return;
         }
       }
       
@@ -212,16 +256,93 @@ io.on('connection', (socket) => {
   // Broadcast the updated state to all players
   io.emit('gameState', gameState);
 
+  // Update the playerReady event handler
+  socket.on('playerReady', (isReady) => {
+    console.log(`Player ${socket.id} ready state: ${isReady}`);
+    const player = gameState.players[socket.id];
+    if (player) {
+      player.isReady = isReady;
+      
+      // Make sure we're using socket.id not player.id (which is shortened)
+      // Update ready players list
+      if (isReady) {
+        // Only add if not already in the list
+        if (!gameState.readyPlayers.includes(socket.id)) {
+          gameState.readyPlayers.push(socket.id);
+        }
+      } else {
+        gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
+      }
+      
+      console.log('Ready players:', gameState.readyPlayers);
+      io.emit('gameState', gameState);
+    }
+  });
+  
+  // Listen for game mode changes (only player 1 can change this)
+  socket.on('setGameMode', (mode) => {
+    const player = gameState.players[socket.id];
+    if (player && player.playerNumber === 1) {
+      console.log(`Game mode changed to: ${mode}`);
+      gameState.gameMode = mode;
+      io.emit('gameState', gameState);
+    }
+  });
+  
+  socket.on('startGame', () => {
+    const player = gameState.players[socket.id];
+    if (player && player.playerNumber === 1) {
+      console.log('Game started by player 1');
+      gameState.appPhase = 'playing';
+      
+      // Reset the board before starting
+      gameState.board = createEmptyBoard(20, 10);
+      
+      // Reset all player scores and positions
+      Object.keys(gameState.players).forEach(id => {
+        if (gameState.readyPlayers.includes(id)) {
+          const p = gameState.players[id];
+          p.score = 0;
+          p.x = 4;
+          p.y = 0;
+          p.currentPiece = getRandomTetromino();
+          p.isWaitingForNextPiece = false;
+          p.isLocking = false;
+          p.lockTimer = 0;
+          p.fallTimer = 0;
+        }
+      });
+      
+      // Stop any existing game loop
+      clearInterval(gameLoop);
+      
+      // Start the full game loop again
+      gameLoop = setInterval(() => {
+        updateGameState();
+        io.emit('gameState', gameState);
+      }, FRAME_DELAY);
+      
+      io.emit('gameState', gameState);
+    }
+  });
+
   // Listen for actions from this player
   socket.on('playerAction', (action) => {
-    console.log(`Player ${socket.id} action:`, action);
-    gameState = handlePlayerAction(gameState, socket.id, action);
-    io.emit('gameState', gameState);
+    // Only process actions if we're in the playing phase
+    if (gameState.appPhase === 'playing') {
+      console.log(`Player ${socket.id} action:`, action);
+      gameState = handlePlayerAction(gameState, socket.id, action);
+      io.emit('gameState', gameState);
+    }
   });
 
   // Handle player disconnects
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
+    
+    // Remove from ready players if present
+    gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
+    
     gameState = handleDisconnect(gameState, socket.id);
     io.emit('gameState', gameState);
   });

@@ -72,13 +72,16 @@ function getRandomTetromino() {
 
 function createGameState() {
   return {
+    appPhase: 'homescreen', // 'homescreen', 'playing', 'gameover'
     board: createEmptyBoard(20, 10),
     players: {}, // will map socket_id -> player data
     gameOver: false,
     playerColors: ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'],
     lineClearActive: false,
     lineClearTimer: 0,
-    linesToClear: []
+    linesToClear: [],
+    gameMode: 'classic', // 'classic', 'battle', 'cooperative'
+    readyPlayers: [] // Array of player IDs who are ready
   };
 }
 
@@ -102,6 +105,8 @@ function handleNewPlayer(gameState, playerId) {
     color: gameState.playerColors[colorIndex],
     currentPiece: getRandomTetromino(),
     id: playerId.substring(0, 4), // Use first 4 chars of socket ID as player identifier
+    playerNumber: Object.keys(gameState.players).length + 1, // Assign player number based on join order
+    isReady: false, // Player readiness state
 
     // 2:48pm properties new
     fallSpeed: 45,
@@ -352,5 +357,6 @@ module.exports = {
   isValidMove,
   placeTetromino, 
   rotateTetromino,
-  clearLines
+  clearLines,
+  createEmptyBoard
 };
