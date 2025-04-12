@@ -7,7 +7,8 @@ const {
   handleNewPlayer,
   handleDisconnect,
   handlePlayerAction,
-  isValidMove,  // Make sure to export this from gameState.js
+  isValidMove,
+  isValidMoveOnBoard, // Add this import
   getRandomTetromino,
   placeTetromino,
   clearLines,
@@ -38,20 +39,61 @@ function handlePieceLocking(gameState, playerId) {
   gameState.board = newBoard;
   player.score += linesCleared * 100;
   
-  // Start entry delay
+  // Start entry delay for new piece
   player.isWaitingForNextPiece = true;
   player.entryDelayTimer = 0;
+  
+  // IMPROVED: Collect affected players first to avoid recursive calls
+  const playersToLock = [];
+  
+  Object.keys(gameState.players).forEach(otherPlayerId => {
+    if (otherPlayerId !== playerId) {
+      const otherPlayer = gameState.players[otherPlayerId];
+      
+      // Skip players waiting for a new piece
+      if (otherPlayer.isWaitingForNextPiece) return;
+      
+      // Check if this player's piece is now in an invalid position
+      if (!isValidMove(gameState.board, otherPlayer.currentPiece, otherPlayer.x, otherPlayer.y, otherPlayerId, gameState.players)) {
+        console.log(`Collision detected for player ${otherPlayerId} after piece lock`);
+        playersToLock.push(otherPlayerId);
+      }
+    }
+  });
+  
+  // Now lock the affected pieces in sequence
+  playersToLock.forEach(idToLock => {
+    const playerToLock = gameState.players[idToLock];
+    
+    // Place the piece directly without recursive call
+    gameState.board = placeTetromino(gameState.board, playerToLock.currentPiece, playerToLock.x, playerToLock.y, idToLock);
+    
+    // Start entry delay for new piece
+    playerToLock.isWaitingForNextPiece = true;
+    playerToLock.entryDelayTimer = 0;
+    
+    console.log(`Forced lock for player ${idToLock}`);
+  });
+  
+  // If any lines were cleared during force locking, process them
+  if (playersToLock.length > 0) {
+    const { newBoard: updatedBoard, linesCleared: additionalLines } = clearLines(gameState);
+    gameState.board = updatedBoard;
+    
+    // Distribute points to the original player who caused the lock chain
+    if (additionalLines > 0) {
+      player.score += additionalLines * 100;
+      console.log(`Player ${playerId} got ${additionalLines} additional lines from chain reaction`);
+    }
+  }
 }
 
 let gameLoop;
 
 function updateGameState() {
-  // Add to updateGameState at the top
+  // Handle line clear animations
   if (gameState.lineClearActive) {
     gameState.lineClearTimer++;
-    
-    // During animation, highlight the rows to be cleared
-    // (This would be sent to clients for visual effect)
     
     if (gameState.lineClearTimer >= LINE_CLEAR_DELAY) {
       // Animation finished, actually clear the lines
@@ -66,14 +108,38 @@ function updateGameState() {
       gameState.board = newBoard;
       gameState.lineClearActive = false;
       gameState.linesToClear = [];
-      
-      // Now we can continue with normal gameplay
     }
     
     // Skip other game updates during line clear
     return;
   }
 
+  // Helper function to check if a piece is touching the ground or locked pieces only
+  // (ignores collisions with other player's active pieces)
+  function isTouchingGround(board, piece, x, y, playerId) {
+    // Check if the piece would collide with the bottom or with locked pieces
+    for (let r = 0; r < piece.shape.length; r++) {
+      for (let c = 0; c < piece.shape[r].length; c++) {
+        if (piece.shape[r][c]) {
+          const boardY = y + r + 1; // Position below current cell
+          const boardX = x + c;
+          
+          // Check if touching bottom
+          if (boardY >= board.length) {
+            return true;
+          }
+          
+          // Check if touching another piece on the board (locked piece)
+          if (board[boardY] && board[boardY][boardX] !== 0) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Helper function to reset player state
   function resetPlayer(gameState, playerId) {
     const player = gameState.players[playerId];
     if (!player) return gameState;
@@ -85,27 +151,33 @@ function updateGameState() {
     player.lockTimer = 0;
     player.isLocking = false;
     player.lockResets = 0;
+    player.fallSpeed = 45; // Normal speed
+    player.softDropSpeed = 5; // Fast speed when soft dropping
+    player.fallTimer = 0;
     
     return gameState;
   }
 
+  // Process each player
   Object.keys(gameState.players).forEach(playerId => {
     const player = gameState.players[playerId];
     
+    // Handle entry delay for new pieces
     if (player.isWaitingForNextPiece) {
       player.entryDelayTimer++;
       
-      if (player.entryDelayTimer >= ENTRY_DELAY) {
-        // Spawn new piece after delay
-        player.currentPiece = getRandomTetromino();
-        player.x = 4;
-        player.y = 0;
-        player.isWaitingForNextPiece = false;
-        console.log(`New piece spawned for player ${playerId}: ${player.currentPiece.type}`);
-        
-        // Update the game over handling in the updateGameState function
-        // In the updateGameState function
-        if (!isValidMove(gameState.board, player.currentPiece, player.x, player.y)) {
+    // In the updateGameState function where it checks for game over
+    if (player.entryDelayTimer >= ENTRY_DELAY) {
+      // Spawn new piece after delay
+      player.currentPiece = getRandomTetromino();
+      player.x = 4;
+      player.y = 0;
+      player.isWaitingForNextPiece = false;
+      console.log(`New piece spawned for player ${playerId}: ${player.currentPiece.type}`);
+      
+      // CHANGE THIS LINE: Only check for collisions with the board and locked pieces, 
+      // not with other players' active pieces
+      if (!isValidMoveOnBoard(gameState.board, player.currentPiece, player.x, player.y, playerId)) {
           console.log(`Game over for player ${playerId}`);
           
           // Trigger game over state
@@ -117,7 +189,6 @@ function updateGameState() {
             score: player.score
           });
     
-          
           // Set timeout to return to homescreen after 5 seconds
           setTimeout(() => {
             // Stop the game loop
@@ -143,7 +214,6 @@ function updateGameState() {
             io.emit('gameState', gameState);
             
             // Restart a simplified game loop for the homescreen
-            // This only sends updates but doesn't process game mechanics
             gameLoop = setInterval(() => {
               io.emit('gameState', gameState);
             }, FRAME_DELAY);
@@ -154,7 +224,7 @@ function updateGameState() {
       }
       
       return; // Skip regular fall logic while waiting
-    }
+    } 
     
     // Handle DAS (Delayed Auto Shift)
     if (player.dasDirection) {
@@ -167,13 +237,13 @@ function updateGameState() {
         if (player.dasRepeatTimer >= DAS_REPEAT) {
           // Time for another movement
           if (player.dasDirection === 'left') {
-            // Try to move left
-            if (isValidMove(gameState.board, player.currentPiece, player.x - 1, player.y)) {
+            // Try to move left - including checking other player pieces
+            if (isValidMove(gameState.board, player.currentPiece, player.x - 1, player.y, playerId, gameState.players)) {
               player.x -= 1;
             }
           } else if (player.dasDirection === 'right') {
-            // Try to move right
-            if (isValidMove(gameState.board, player.currentPiece, player.x + 1, player.y)) {
+            // Try to move right - including checking other player pieces
+            if (isValidMove(gameState.board, player.currentPiece, player.x + 1, player.y, playerId, gameState.players)) {
               player.x += 1;
             }
           }
@@ -184,11 +254,16 @@ function updateGameState() {
       }
     }
     
-    // Regular falling logic - ADD RIGHT HERE
-    // Increment player's fall timer
+    // Regular falling logic
     player.fallTimer = (player.fallTimer || 0) + 1;
     
-    if (isValidMove(gameState.board, player.currentPiece, player.x, player.y + 1)) {
+    // First check if the piece can fall without hitting the ground or locked pieces
+    const isTouchingFloorOrLockedPiece = isTouchingGround(gameState.board, player.currentPiece, player.x, player.y, playerId);
+    
+    // Second check if the piece would collide with another player's piece
+    const canFallWithoutCollision = isValidMove(gameState.board, player.currentPiece, player.x, player.y + 1, playerId, gameState.players);
+    
+    if (!isTouchingFloorOrLockedPiece && canFallWithoutCollision) {
       // Piece can still fall
       if (player.fallTimer >= player.fallSpeed) {
         player.y += 1;
@@ -198,8 +273,8 @@ function updateGameState() {
         player.isLocking = false;
         player.lockTimer = 0;
       }
-    } else {
-      // Piece is touching ground, start lock process
+    } else if (isTouchingFloorOrLockedPiece) {
+      // Only start locking if touching ground or locked pieces, NOT other players' active pieces
       if (!player.isLocking) {
         player.isLocking = true;
         player.lockTimer = 0;
@@ -212,9 +287,14 @@ function updateGameState() {
         handlePieceLocking(gameState, playerId);
         player.isLocking = false;
       }
+    } else {
+      // The piece can't fall but it's not touching ground (must be hitting another player's piece)
+      // Don't lock, just wait (pieces can hover in mid-air if blocked by other pieces)
+      player.fallTimer = 0;
     }
   });
 }
+
 
 // make it pretty easy hopefully to avoid locking issues.
 function startGameLoop() {
@@ -355,4 +435,4 @@ server.listen(PORT, () => {
 });
 
 // Start the game loop when the server starts
-startGameLoop();
+//startGameLoop();s

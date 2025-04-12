@@ -17,11 +17,6 @@ const GameOverScreen = ({ gameOverData }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // Handle potential missing data
-  const playerId = gameOverData && gameOverData.playerId ? 
-    gameOverData.playerId.substring(0, 4) : 'Unknown';
-  const score = gameOverData ? gameOverData.score : 0;
-
   return (
     <div style={{
       position: 'fixed',
@@ -40,7 +35,8 @@ const GameOverScreen = ({ gameOverData }) => {
     }}>
       <h1 style={{ fontSize: '48px', marginBottom: '20px' }}>GAME OVER</h1>
       
-      <p>Player {playerId} lost with score: {score}</p>
+      {/* Remove player-specific information */}
+      <p>Game has ended!</p>
       
       <div style={{ marginTop: '30px' }}>
         Returning to homescreen in {countdown} seconds...

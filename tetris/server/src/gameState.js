@@ -75,13 +75,15 @@ function createGameState() {
     appPhase: 'homescreen', // 'homescreen', 'playing', 'gameover'
     board: createEmptyBoard(20, 10),
     players: {}, // will map socket_id -> player data
+    disconnectedPlayers: {}, // Store data of disconnected players
     gameOver: false,
     playerColors: ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'],
     lineClearActive: false,
     lineClearTimer: 0,
     linesToClear: [],
     gameMode: 'classic', // 'classic', 'battle', 'cooperative'
-    readyPlayers: [] // Array of player IDs who are ready
+    readyPlayers: [], // Array of player IDs who are ready
+    gameInProgress: false // Flag to indicate if a game is in progress
   };
 }
 
@@ -128,14 +130,65 @@ function handleNewPlayer(gameState, playerId) {
 }
 
 function handleDisconnect(gameState, playerId) {
-  // Remove the disconnected player from the game state
-  delete gameState.players[playerId];
+  const player = gameState.players[playerId];
+  
+  if (player) {
+    // If the game is in progress, save the player's data for possible rejoin
+    if (gameState.appPhase === 'playing') {
+      gameState.disconnectedPlayers[player.id] = {
+        ...player,
+        originalId: playerId, // Save the original socket ID
+        disconnectedAt: Date.now()
+      };
+      
+      console.log(`Player ${player.id} disconnected during game and data saved for rejoin`);
+    }
+    
+    // Remove the player from the active players list
+    delete gameState.players[playerId];
+  }
+  
   return gameState;
 }
 
-// Check if a move is valid (no collision with walls or other pieces)
-function isValidMove(board, tetromino, x, y) {
+// Add this function to gameState.js
+function isValidMoveOnBoard(board, tetromino, x, y, currentPlayerId) {
   const shape = tetromino.shape;
+  
+  // Check each cell of the tetromino
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[r].length; c++) {
+      if (shape[r][c] !== 0) {
+        const boardX = x + c;
+        const boardY = y + r;
+        
+        // Check boundaries
+        if (boardX < 0 || boardX >= board[0].length || boardY >= board.length) {
+          return false;
+        }
+        
+        // Check if there's already a piece on the board (locked pieces only)
+        if (boardY >= 0 && board[boardY][boardX] !== 0) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// Don't forget to export it
+module.exports = {
+  // ...existing exports
+  isValidMoveOnBoard
+};
+
+// Check if a move is valid (no collision with walls or other pieces)
+// Update the isValidMove function to account for other players' active pieces
+function isValidMove(board, tetromino, x, y, currentPlayerId, allPlayers) {
+  const shape = tetromino.shape;
+  
+  // Check each cell of the tetromino
   for (let r = 0; r < shape.length; r++) {
     for (let c = 0; c < shape[r].length; c++) {
       if (shape[r][c] !== 0) {
@@ -150,6 +203,37 @@ function isValidMove(board, tetromino, x, y) {
         // Check if there's already a piece on the board
         if (boardY >= 0 && board[boardY][boardX] !== 0) {
           return false;
+        }
+        
+        // NEW: Check for collision with other players' active pieces
+        if (allPlayers && boardY >= 0) {
+          // Check each player's active piece
+          for (const playerId in allPlayers) {
+            // Skip the current player
+            if (playerId === currentPlayerId) continue;
+            
+            const otherPlayer = allPlayers[playerId];
+            // Skip players waiting for next piece
+            if (otherPlayer.isWaitingForNextPiece) continue;
+            
+            const otherPiece = otherPlayer.currentPiece;
+            if (!otherPiece) continue;
+            
+            // Check if this space is occupied by the other player's piece
+            for (let pr = 0; pr < otherPiece.shape.length; pr++) {
+              for (let pc = 0; pc < otherPiece.shape[pr].length; pc++) {
+                if (otherPiece.shape[pr][pc] !== 0) {
+                  const otherX = otherPlayer.x + pc;
+                  const otherY = otherPlayer.y + pr;
+                  
+                  // If positions match, we have a collision
+                  if (boardX === otherX && boardY === otherY) {
+                    return false;
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -196,29 +280,29 @@ function rotateTetromino(tetromino) {
 // Check for completed lines and clear them
 function clearLines(gameState) {
   const board = gameState.board;
-  let linesToClear = [];
+  const linesToClear = [];
   
-  // Find full rows
-  for (let r = 0; r < board.length; r++) {
-    if (board[r].every(cell => cell !== 0)) {
-      linesToClear.push(r);
+  // Find completed lines
+  for (let row = 0; row < board.length; row++) {
+    if (board[row].every(cell => cell !== 0)) {
+      linesToClear.push(row);
     }
   }
   
+  // If we found lines to clear, start the clear animation
   if (linesToClear.length > 0) {
-    // Set up for line clear animation
     gameState.lineClearActive = true;
     gameState.lineClearTimer = 0;
     gameState.linesToClear = linesToClear;
     
-    return {
-      newBoard: board, // Return unchanged during animation
-      linesCleared: linesToClear.length
-    };
+    // Highlight the lines to be cleared
+    // This is for visual effect - the actual clearing happens after animation
   }
   
-  // No lines to clear, return as before
-  return { newBoard: board, linesCleared: 0 };
+  return { 
+    newBoard: board,
+    linesCleared: linesToClear.length 
+  };
 }
 
 function handlePlayerAction(gameState, playerId, action) {
@@ -232,14 +316,14 @@ function handlePlayerAction(gameState, playerId, action) {
   
   switch (action.type) {
     case 'moveLeft':
-      if (isValidMove(board, currentPiece, x - 1, y)) {
+      if (isValidMove(board, currentPiece, x - 1, y, playerId, gameState.players)) {
         player.x -= 1;
         successfulMove = true;
       }
       break;
       
     case 'moveRight':
-      if (isValidMove(board, currentPiece, x + 1, y)) {
+      if (isValidMove(board, currentPiece, x + 1, y, playerId, gameState.players)) {
         player.x += 1;
         successfulMove = true;
       }
@@ -247,7 +331,7 @@ function handlePlayerAction(gameState, playerId, action) {
       
     case 'rotate':
       const rotatedPiece = rotateTetromino(currentPiece);
-      if (isValidMove(board, rotatedPiece, x, y)) {
+      if (isValidMove(board, rotatedPiece, x, y, playerId, gameState.players)) {
         player.currentPiece = rotatedPiece;
         successfulMove = true;
       }
@@ -256,7 +340,7 @@ function handlePlayerAction(gameState, playerId, action) {
     case 'drop':
       // Move down until collision
       let newY = y;
-      while (isValidMove(board, currentPiece, x, newY + 1)) {
+      while (isValidMoveOnBoard(board, currentPiece, x, newY + 1, playerId, gameState.players)) {
         newY++;
       }
       
@@ -276,7 +360,7 @@ function handlePlayerAction(gameState, playerId, action) {
     case 'hardDrop':
       // Move down until collision
       let hardDropY = y;
-      while (isValidMove(board, currentPiece, x, hardDropY + 1)) {
+      while (isValidMoveOnBoard(board, currentPiece, x, hardDropY + 1, playerId, gameState.players)) {
         hardDropY++;
         // Award more points for hard drop (optional)
         player.score += 2;
@@ -297,7 +381,7 @@ function handlePlayerAction(gameState, playerId, action) {
       
     case 'softDrop':
       // If valid move downward
-      if (isValidMove(board, currentPiece, x, y + 1)) {
+      if (isValidMove(board, currentPiece, x, y + 1, playerId, gameState.players)) {
         player.y += 1;
         // Award points for soft drop (optional)
         player.score += 1;
@@ -355,6 +439,7 @@ module.exports = {
   TETROMINOES,
   getRandomTetromino,
   isValidMove,
+  isValidMoveOnBoard,  // Add this line
   placeTetromino, 
   rotateTetromino,
   clearLines,
