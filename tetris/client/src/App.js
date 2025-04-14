@@ -1,7 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import io from 'socket.io-client';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { io } from 'socket.io-client';
+import GameBoard from './GameBoard';
 import HomeScreen from './HomeScreen';
 import GameOverScreen from './GameOverScreen';
+import ScorePanel from './ScorePanel';
+
+// Background image configuration
+const BACKGROUND_IMAGES = [
+  'deep-tetris-color.jpg',
+  'tetris-1920-x-1080-background-hyihqau5t3lalo4e.png',
+  'tetris-2560-x-1600-background-3bjbi7nyulqbller.jpg',
+];
+const BACKGROUND_CHANGE_INTERVAL = 30000; // 30 seconds
 
 // Load config file to get server address
 const loadConfig = async () => {
@@ -17,275 +27,6 @@ const loadConfig = async () => {
   }
 };
 
-// Map of tetromino values to colors
-const COLORS = {
-  1: 'cyan',    // I
-  2: 'blue',    // J
-  3: 'orange',  // L
-  4: 'yellow',  // O
-  5: 'green',   // S
-  6: 'purple',  // T
-  7: 'red'      // Z
-};
-
-// ----- GAME BOARD COMPONENT -----
-const GameBoard = ({ board, players, currentPlayerId }) => {
-  const canvasRef = useRef(null);
-  const cellSize = 30; // each cell is 30px
-  
-  // Calculate canvas dimensions based on board size
-  const canvasWidth = board?.[0]?.length ? board[0].length * cellSize : 300;
-  const canvasHeight = board?.length ? board.length * cellSize : 600;
-
-  useEffect(() => {
-    if (!board || !Array.isArray(board) || board.length === 0 || !Array.isArray(board[0])) {
-      console.warn("Invalid board structure:", board);
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // Clear the canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw a dark background
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw the grid
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 0.5;
-    
-    // Draw grid lines
-    for (let r = 0; r <= board.length; r++) {
-      ctx.beginPath();
-      ctx.moveTo(0, r * cellSize);
-      ctx.lineTo(canvas.width, r * cellSize);
-      ctx.stroke();
-    }
-    
-    for (let c = 0; c <= board[0].length; c++) {
-      ctx.beginPath();
-      ctx.moveTo(c * cellSize, 0);
-      ctx.lineTo(c * cellSize, canvas.height);
-      ctx.stroke();
-    }
-    
-    // Draw placed pieces on the board
-    for (let r = 0; r < board.length; r++) {
-      if (!Array.isArray(board[r])) {
-        console.warn(`Invalid board row at index ${r}:`, board[r]);
-        continue;
-      }
-      
-      for (let c = 0; c < board[r].length; c++) {
-        const cell = board[r][c];
-        if (cell !== 0) {
-          // If the cell has a complex structure (from server)
-          if (typeof cell === 'object' && cell !== null) {
-            const playerId = cell.playerId;
-            if (!playerId) {
-              ctx.fillStyle = 'gray';
-            } else {
-              const player = Object.values(players || {}).find(p => p && p.id === playerId.substring(0, 4));
-              ctx.fillStyle = player ? player.color : 'gray';
-            }
-          } else {
-            // If it's just a number (simple case)
-            ctx.fillStyle = COLORS[cell] || 'gray';
-          }
-          
-          ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
-          ctx.strokeStyle = '#FFF';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(c * cellSize, r * cellSize, cellSize, cellSize);
-        }
-      }
-    }
-
-    // Draw line clear animation if active
-    if (Array.isArray(board.linesToClear) && board.linesToClear.length > 0) {
-      board.linesToClear.forEach(rowIndex => {
-        // Flash or highlight the rows being cleared
-        const flash = Math.floor(Date.now() / 100) % 2 === 0;
-        ctx.fillStyle = flash ? '#FFFFFF' : '#888888';
-        ctx.fillRect(0, rowIndex * cellSize, canvas.width, cellSize);
-      });
-    }
-      
-    // Draw active tetromino for each player
-    if (players && typeof players === 'object') {
-      Object.values(players).forEach(player => {
-        if (!player || !player.currentPiece || !player.currentPiece.shape) return;
-        
-        const { x, y, currentPiece, color } = player;
-        const shape = currentPiece.shape;
-        
-        if (!Array.isArray(shape)) {
-          console.warn("Invalid shape:", shape);
-          return;
-        }
-        
-        for (let r = 0; r < shape.length; r++) {
-          if (!Array.isArray(shape[r])) {
-            console.warn(`Invalid shape row at index ${r}:`, shape[r]);
-            continue;
-          }
-          
-          for (let c = 0; c < shape[r].length; c++) {
-            if (shape[r][c] !== 0) {
-              const boardX = x + c;
-              const boardY = y + r;
-              
-              // Skip if out of bounds or above the board
-              if (boardX < 0 || boardX >= board[0].length || 
-                  boardY < 0 || boardY >= board.length) {
-                continue;
-              }
-              
-              ctx.fillStyle = color || currentPiece.color || 'gray';
-              ctx.fillRect(boardX * cellSize, boardY * cellSize, cellSize, cellSize);
-              ctx.strokeStyle = '#FFF';
-              ctx.lineWidth = 1;
-              ctx.strokeRect(boardX * cellSize, boardY * cellSize, cellSize, cellSize);
-            }
-          }
-        }
-      });
-    }
-    
-  }, [board, players, currentPlayerId]);
-
-  return (
-    <div>
-      <canvas
-        ref={canvasRef}
-        width={canvasWidth}
-        height={canvasHeight}
-        style={{ border: '2px solid #555' }}
-      />
-    </div>
-  );
-};
-
-// ----- PLAYER LIST COMPONENT -----
-const PlayerList = ({ players, currentPlayerId }) => {
-  const currentPlayerShortId = currentPlayerId?.substring(0, 4);
-  
-  if (!players || typeof players !== 'object') {
-    return <div>No players connected</div>;
-  }
-  
-  return (
-    <div style={{ marginBottom: '20px' }}>
-      <h3 style={{ marginBottom: '10px' }}>Players</h3>
-      
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        gap: '10px',
-        maxWidth: '250px'
-      }}>
-        {Object.values(players).map(player => {
-          if (!player) return null;
-          const isCurrentPlayer = player.id === currentPlayerShortId;
-          
-          return (
-            <div 
-              key={player.id}
-              style={{ 
-                display: 'flex',
-                alignItems: 'center',
-                padding: '8px',
-                backgroundColor: '#333',
-                borderRadius: '4px',
-                borderLeft: `4px solid ${player.color}`,
-              }}
-            >
-              <div 
-                style={{ 
-                  width: '15px', 
-                  height: '15px', 
-                  backgroundColor: player.color,
-                  marginRight: '10px',
-                  borderRadius: '3px'
-                }}
-              />
-              
-              <div style={{ flex: 1 }}>
-                Player {player.playerNumber}
-                {isCurrentPlayer && ' (You)'}
-              </div>
-              
-              <div style={{ 
-                marginLeft: 'auto', 
-                fontWeight: 'bold', 
-                fontSize: '14px',
-                color: '#AAA'
-              }}>
-                {player.score}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-// ----- SCOREBOARD COMPONENT -----
-const ScoreBoard = ({ players }) => {
-  if (!players || typeof players !== 'object') {
-    return null;
-  }
-  
-  // Sort players by score in descending order
-  const sortedPlayers = [...Object.values(players)].sort((a, b) => b.score - a.score);
-  
-  return (
-    <div>
-      <h3 style={{ marginBottom: '10px' }}>Scores</h3>
-      
-      <div style={{
-        backgroundColor: '#222',
-        padding: '10px',
-        borderRadius: '4px',
-        maxWidth: '250px'
-      }}>
-        {sortedPlayers.map(player => (
-          <div 
-            key={player.id}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '5px 0',
-              borderBottom: '1px solid #444'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div 
-                style={{ 
-                  width: '10px', 
-                  height: '10px', 
-                  backgroundColor: player.color,
-                  marginRight: '8px',
-                  borderRadius: '2px'
-                }}
-              />
-              <span>Player {player.playerNumber}</span>
-            </div>
-            <div style={{ fontWeight: 'bold' }}>{player.score}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// ----- MAIN APP COMPONENT -----
 function App() {
   const [socket, setSocket] = useState(null);
   const [gameState, setGameState] = useState(null);
@@ -293,6 +34,17 @@ function App() {
   const [gameOverData, setGameOverData] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Add state for background rotation
+  const [currentBackgroundIndex, setCurrentBackgroundIndex] = useState(0);
+  const backgroundIntervalRef = useRef(null);
+  
+  // Add state for timer and scoring
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [currentScore, setCurrentScore] = useState(0);
+  const [lastScoreChange, setLastScoreChange] = useState(0);
+  const [level, setLevel] = useState(1);
+  const timerIntervalRef = useRef(null);
   
   // Connect to socket on component mount
   useEffect(() => {
@@ -325,6 +77,7 @@ function App() {
         newSocket.on('init', (initialState) => {
           console.log('Received initial game state:', initialState);
           setGameState(initialState);
+          updatePlayerList(initialState.players || {});
         });
         
         newSocket.on('gameState', (newState) => {
@@ -334,6 +87,11 @@ function App() {
                 newState.appPhase === 'playing') {
               // Don't update state - keep showing "Game in Progress" screen
               return prevState;
+            }
+            
+            // Update player list if we have new state
+            if (newState) {
+              updatePlayerList(newState.players || {});
             }
             
             // Otherwise update normally
@@ -361,6 +119,100 @@ function App() {
     
     connectToServer();
   }, []);
+  
+  // Background rotation effect - only active during gameplay
+  useEffect(() => {
+    // Clear any existing background rotation interval
+    if (backgroundIntervalRef.current) {
+      clearInterval(backgroundIntervalRef.current);
+      backgroundIntervalRef.current = null;
+    }
+    
+    // Start background rotation when game is playing
+    if (gameState && gameState.appPhase === 'playing') {
+      // Randomize starting background
+      setCurrentBackgroundIndex(Math.floor(Math.random() * BACKGROUND_IMAGES.length));
+      
+      // Set interval to rotate backgrounds
+      backgroundIntervalRef.current = setInterval(() => {
+        setCurrentBackgroundIndex(prevIndex => 
+          (prevIndex + 1) % BACKGROUND_IMAGES.length
+        );
+      }, BACKGROUND_CHANGE_INTERVAL);
+    }
+    
+    // Cleanup on unmount or phase change
+    return () => {
+      if (backgroundIntervalRef.current) {
+        clearInterval(backgroundIntervalRef.current);
+        backgroundIntervalRef.current = null;
+      }
+    };
+  }, [gameState?.appPhase]);
+  
+  // Timer management based on game phase
+  useEffect(() => {
+    // Clean up the previous interval if it exists
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    
+    if (gameState && gameState.appPhase === 'playing') {
+      // Reset the timer when game starts
+      setElapsedTime(0);
+      setCurrentScore(0);
+      setLastScoreChange(0);
+      setLevel(1);
+      
+      // Start a new timer that updates every 10ms for centisecond precision
+      timerIntervalRef.current = setInterval(() => {
+        setElapsedTime(prevTime => prevTime + 10);
+      }, 10);
+      
+      console.log('Timer started');
+    }
+    
+    // Cleanup on unmount or phase change
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    };
+  }, [gameState?.appPhase]); 
+  
+  // Update the player list for display and track current player's score
+  const updatePlayerList = useCallback((players) => {
+    if (!players || typeof players !== 'object') return;
+    
+    // Map player data to what we need
+    const playerEntries = Object.entries(players);
+    
+    // Update current player score state for the score panel
+    if (socket) {
+      const currentPlayerEntry = playerEntries.find(([id]) => id === socket.id);
+      if (currentPlayerEntry) {
+        const [, currentPlayer] = currentPlayerEntry;
+        
+        // Update score if changed
+        if (currentPlayer.score !== currentScore) {
+          const scoreChange = Math.max(0, currentPlayer.score - currentScore);
+          if (scoreChange > 0) {
+            setLastScoreChange(scoreChange);
+            // Reset the score change highlight after 1 second
+            setTimeout(() => setLastScoreChange(0), 1000);
+          }
+          setCurrentScore(currentPlayer.score);
+        }
+        
+        // Update level if changed
+        if (currentPlayer.level && currentPlayer.level !== level) {
+          setLevel(currentPlayer.level);
+        }
+      }
+    }
+  }, [currentScore, level, socket]);
   
   // Keyboard control handlers
   useEffect(() => {
@@ -392,6 +244,13 @@ function App() {
             break;
           default:
             break;
+        }
+      } else if (gameState.appPhase === 'homescreen') {
+        // Handle ready toggle on X key press
+        if (e.code === 'KeyX') {
+          const isCurrentlyReady = gameState.readyPlayers.includes(socket.id);
+          console.log('X key pressed, toggling ready state:', !isCurrentlyReady);
+          socket.emit('playerReady', !isCurrentlyReady);
         }
       }
     };
@@ -449,6 +308,12 @@ function App() {
     setGameOverData(null);
   }, []);
 
+  // Get the current background image URL
+  const getCurrentBackgroundUrl = () => {
+    if (!BACKGROUND_IMAGES.length) return null;
+    return `${process.env.PUBLIC_URL}/backgrounds/${BACKGROUND_IMAGES[currentBackgroundIndex]}`;
+  };
+
   // Show loading or error screen
   if (isConnecting) {
     return <div className="App"><h1>Connecting to server...</h1></div>;
@@ -485,7 +350,20 @@ function App() {
 
   // Home screen or game screen based on app phase
   return (
-    <div className="App">
+    <div 
+      className="App"
+      style={{ 
+        // Apply background image only during gameplay
+        ...(gameState.appPhase === 'playing' && {
+          backgroundImage: `url(${getCurrentBackgroundUrl()})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          transition: 'background-image 1s ease-in-out',
+          minHeight: '100vh'
+        })
+      }}
+      tabIndex="0"
+    >
       {gameState.appPhase === 'homescreen' && (
         <HomeScreen
           players={gameState.players || {}}
@@ -501,21 +379,145 @@ function App() {
       )}
       
       {gameState.appPhase === 'playing' && (
-        <>
-          <h1>Tetristributed</h1>
-          <p>Connected as player: {socket?.id && socket.id.substring(0, 4)}</p>
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-            <GameBoard 
-              board={gameState.board || []} 
-              players={gameState.players || {}}
-              currentPlayerId={socket?.id}
-            />
-            <div>
-              <PlayerList players={gameState.players || {}} currentPlayerId={socket?.id} />
-              <ScoreBoard players={gameState.players || {}} />
+        <div style={{
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(5px)',
+          padding: '20px',
+          borderRadius: '10px',
+          margin: '10px auto',
+          maxWidth: '900px'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: '15px' 
+          }}>
+            <h1 style={{ margin: 0, fontSize: '28px', color: '#fff' }}>Tetristributed</h1>
+            <div style={{ 
+              fontSize: '14px', 
+              backgroundColor: '#333', 
+              padding: '5px 10px', 
+              borderRadius: '4px' 
+            }}>
+              Player: {socket?.id && socket.id.substring(0, 4)}
             </div>
           </div>
-        </>
+          
+          <div style={{ display: 'flex', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <GameBoard 
+                board={gameState.board || []} 
+                players={gameState.players || {}}
+                currentPlayerId={socket?.id}
+              />
+            </div>
+            
+            <div style={{ 
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: '220px'
+            }}>
+              {/* Integrated Score Panel with Timer */}
+              <ScorePanel 
+                score={currentScore}
+                level={level}
+                lastScoreChange={lastScoreChange}
+                elapsedTime={elapsedTime}
+              />
+              
+              {/* Players List */}
+              <div style={{ 
+                backgroundColor: 'rgba(40, 40, 40, 0.9)',
+                padding: '12px',
+                borderRadius: '8px',
+                marginTop: '15px'
+              }}>
+                <h2 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#ccc' }}>Players</h2>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {Object.entries(gameState.players || {}).map(([id, player]) => {
+                    const isCurrentPlayer = id === socket?.id;
+                    const shortId = id.substring(0, 4);
+                    
+                    return (
+                      <li 
+                        key={id} 
+                        style={{ 
+                          margin: '6px 0',
+                          padding: '8px',
+                          backgroundColor: isCurrentPlayer ? '#444' : '#333',
+                          borderLeft: `4px solid ${player.color || '#ccc'}`,
+                          borderRadius: '4px',
+                          transition: 'background-color 0.3s'
+                        }}
+                      >
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'space-between' 
+                        }}>
+                          <div>
+                            <span style={{ 
+                              fontWeight: isCurrentPlayer ? 'bold' : 'normal',
+                              color: isCurrentPlayer ? '#fff' : '#ccc'
+                            }}>
+                              Player {player.playerNumber || shortId}
+                            </span>
+                            {isCurrentPlayer && <span style={{ 
+                              fontSize: '12px', 
+                              marginLeft: '5px', 
+                              color: '#ffcc00'
+                            }}>
+                              (You)
+                            </span>}
+                          </div>
+                          <div style={{ 
+                            backgroundColor: '#222', 
+                            padding: '2px 6px', 
+                            borderRadius: '3px',
+                            fontSize: '14px',
+                            fontWeight: 'bold'
+                          }}>
+                            {player.score || 0}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                
+                <div style={{ 
+                  marginTop: '15px', 
+                  padding: '8px', 
+                  backgroundColor: '#222', 
+                  borderRadius: '4px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '12px', color: '#aaa' }}>GAME MODE</div>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px' }}>
+                    {gameState.gameMode || 'Classic'}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Controls Help */}
+              <div style={{ 
+                backgroundColor: 'rgba(40, 40, 40, 0.7)',
+                padding: '12px',
+                borderRadius: '8px',
+                marginTop: '15px',
+                fontSize: '12px',
+                color: '#aaa'
+              }}>
+                <div style={{ marginBottom: '5px', fontWeight: 'bold', color: '#ccc' }}>Controls:</div>
+                <div>← → : Move</div>
+                <div>↓ : Soft Drop</div>
+                <div>↑ / Z : Rotate</div>
+                <div>Space : Hard Drop</div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
       
       {isGameOver && gameOverData && (
