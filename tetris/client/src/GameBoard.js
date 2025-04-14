@@ -13,6 +13,11 @@ const COLORS = {
 
 function GameBoard({ board, players, currentPlayerId }) {
   const canvasRef = useRef(null);
+  const cellSize = 30; // each cell is 30px
+  
+  // Calculate canvas dimensions based on board size
+  const canvasWidth = board[0] ? board[0].length * cellSize : 300;
+  const canvasHeight = board.length * cellSize || 600;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -30,8 +35,6 @@ function GameBoard({ board, players, currentPlayerId }) {
     // Draw the grid
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 0.5;
-    
-    const cellSize = 30; // each cell is 30px
     
     // Draw grid lines
     for (let r = 0; r <= board.length; r++) {
@@ -118,8 +121,8 @@ function GameBoard({ board, players, currentPlayerId }) {
     <div>
       <canvas
         ref={canvasRef}
-        width={300}  // 10 columns * 30 px
-        height={600} // 20 rows * 30 px
+        width={canvasWidth}  // 10 columns * 30 px
+        height={canvasHeight} // 20 rows * 30 px
         style={{ border: '2px solid #555' }}
       />
     </div>

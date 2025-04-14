@@ -1,89 +1,293 @@
 // server/src/gameState.js
 
 // Define tetromino shapes and colors
+// Update the TETROMINOES definition with all rotations
+
+// Define tetromino shapes and colors with all rotations
 const TETROMINOES = {
+  // I (cyan)
   I: {
-    shape: [
-      [0, 0, 0, 0],
-      [1, 1, 1, 1],
-      [0, 0, 0, 0],
-      [0, 0, 0, 0]
-    ],
-    color: 'cyan'
+    color: 'cyan',
+    rotations: [
+      // 0°
+      [
+        [0, 0, 0, 0],
+        [1, 1, 1, 1],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 0, 1, 0],
+        [0, 0, 1, 0],
+        [0, 0, 1, 0],
+        [0, 0, 1, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [1, 1, 1, 1],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [0, 1, 0, 0],
+        [0, 1, 0, 0],
+        [0, 1, 0, 0],
+        [0, 1, 0, 0]
+      ]
+    ]
   },
-  J: {
-    shape: [
-      [2, 0, 0],
-      [2, 2, 2],
-      [0, 0, 0]
-    ],
-    color: 'blue'
-  },
-  L: {
-    shape: [
-      [0, 0, 3],
-      [3, 3, 3],
-      [0, 0, 0]
-    ],
-    color: 'orange'
-  },
+
+  // O (yellow)
   O: {
-    shape: [
-      [4, 4],
-      [4, 4]
-    ],
-    color: 'yellow'
+    color: 'yellow',
+    rotations: [
+      // All orientations are the same
+      [
+        [0, 1, 1, 0],
+        [0, 1, 1, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      [
+        [0, 1, 1, 0],
+        [0, 1, 1, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      [
+        [0, 1, 1, 0],
+        [0, 1, 1, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      [
+        [0, 1, 1, 0],
+        [0, 1, 1, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
   },
+
+  // J (blue)
+  J: {
+    color: 'blue',
+    rotations: [
+      // 0°
+      [
+        [2, 0, 0, 0],
+        [2, 2, 2, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 2, 2, 0],
+        [0, 2, 0, 0],
+        [0, 2, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [2, 2, 2, 0],
+        [0, 0, 2, 0],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [0, 2, 0, 0],
+        [0, 2, 0, 0],
+        [2, 2, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
+  },
+
+  // L (orange)
+  L: {
+    color: 'orange',
+    rotations: [
+      // 0°
+      [
+        [0, 0, 3, 0],
+        [3, 3, 3, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 3, 0, 0],
+        [0, 3, 0, 0],
+        [0, 3, 3, 0],
+        [0, 0, 0, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [3, 3, 3, 0],
+        [3, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [3, 3, 0, 0],
+        [0, 3, 0, 0],
+        [0, 3, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
+  },
+
+  // S (green)
   S: {
-    shape: [
-      [0, 5, 5],
-      [5, 5, 0],
-      [0, 0, 0]
-    ],
-    color: 'green'
+    color: 'green',
+    rotations: [
+      // 0°
+      [
+        [0, 4, 4, 0],
+        [4, 4, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 4, 0, 0],
+        [0, 4, 4, 0],
+        [0, 0, 4, 0],
+        [0, 0, 0, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [0, 4, 4, 0],
+        [4, 4, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [4, 0, 0, 0],
+        [4, 4, 0, 0],
+        [0, 4, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
   },
-  T: {
-    shape: [
-      [0, 6, 0],
-      [6, 6, 6],
-      [0, 0, 0]
-    ],
-    color: 'purple'
-  },
+
+  // Z (red)
   Z: {
-    shape: [
-      [7, 7, 0],
-      [0, 7, 7],
-      [0, 0, 0]
-    ],
-    color: 'red'
+    color: 'red',
+    rotations: [
+      // 0°
+      [
+        [5, 5, 0, 0],
+        [0, 5, 5, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 0, 5, 0],
+        [0, 5, 5, 0],
+        [0, 5, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [5, 5, 0, 0],
+        [0, 5, 5, 0],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [0, 5, 0, 0],
+        [5, 5, 0, 0],
+        [5, 0, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
+  },
+
+  // T (purple)
+  T: {
+    color: 'purple',
+    rotations: [
+      // 0°
+      [
+        [0, 6, 0, 0],
+        [6, 6, 6, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 90°
+      [
+        [0, 6, 0, 0],
+        [0, 6, 6, 0],
+        [0, 6, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 180°
+      [
+        [0, 0, 0, 0],
+        [6, 6, 6, 0],
+        [0, 6, 0, 0],
+        [0, 0, 0, 0]
+      ],
+      // 270°
+      [
+        [0, 6, 0, 0],
+        [6, 6, 0, 0],
+        [0, 6, 0, 0],
+        [0, 0, 0, 0]
+      ]
+    ]
   }
 };
 
 // Get a random tetromino type
+// Update the getRandomTetromino function
+
 function getRandomTetromino() {
   const types = Object.keys(TETROMINOES);
   const randomType = types[Math.floor(Math.random() * types.length)];
-  return {
+  const tetromino = TETROMINOES[randomType];
+  
+  return { 
     type: randomType,
-    ...TETROMINOES[randomType]
+    color: tetromino.color,
+    shape: tetromino.rotations[0], // Use first rotation as default
+    rotationIndex: 0 // Track current rotation
   };
+}
+
+function getBoardDimensions(playerCount) {
+  switch (playerCount) {
+    case 1: return { rows: 20, cols: 10 }; // Standard single player
+    case 2: return { rows: 20, cols: 14 }; // Two players
+    case 3: return { rows: 20, cols: 21 }; // Three players
+    case 4: return { rows: 20, cols: 28 }; // Four players
+    default: return { rows: 20, cols: 10 }; // Default
+  }
 }
 
 function createGameState() {
   return {
-    appPhase: 'homescreen', // 'homescreen', 'playing', 'gameover'
+    appPhase: 'homescreen',
     board: createEmptyBoard(20, 10),
-    players: {}, // will map socket_id -> player data
-    disconnectedPlayers: {}, // Store data of disconnected players
-    gameOver: false,
+    players: {}, // All active players
+    activePlayers: new Set(), // Track which players are currently active
+    disconnectedPlayers: {}, // Store data for disconnected players who might rejoin
     playerColors: ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'],
     lineClearActive: false,
     lineClearTimer: 0,
     linesToClear: [],
-    gameMode: 'classic', // 'classic', 'battle', 'cooperative'
-    readyPlayers: [], // Array of player IDs who are ready
-    gameInProgress: false // Flag to indicate if a game is in progress
+    gameMode: 'classic',
+    readyPlayers: [],
+    gameInProgress: false
   };
 }
 
@@ -96,141 +300,165 @@ function createEmptyBoard(rows, cols) {
 }
 
 function handleNewPlayer(gameState, playerId) {
-  // Assign a color from our color pool
+  // If game is in progress, don't add new players
+  if (gameState.appPhase === 'playing') {
+    console.log(`Player ${playerId} tried to join during active game`);
+    return gameState;
+  }
+  
+  // Check for potential rejoin
+  const shortId = playerId.substring(0, 4);
+  if (gameState.disconnectedPlayers[shortId]) {
+    console.log(`Player ${shortId} is rejoining`);
+    const savedData = gameState.disconnectedPlayers[shortId];
+    
+    // Create player with saved data
+    gameState.players[playerId] = {
+      id: shortId,
+      playerNumber: savedData.playerNumber,
+      color: savedData.color,
+      score: 0,
+      isReady: false,
+      isRejoining: true,
+      x: 4, y: 0,
+      currentPiece: getRandomTetromino(),
+      fallSpeed: 45, fallTimer: 0,
+      softDropSpeed: 5,
+      dasDirection: null, dasTimer: 0, dasRepeatTimer: 0,
+      lockTimer: 0, isLocking: false,
+      entryDelayTimer: 0, isWaitingForNextPiece: false,
+      lockResets: 0
+    };
+    
+    gameState.activePlayers.add(playerId);
+    delete gameState.disconnectedPlayers[shortId];
+    return gameState;
+  }
+  
+  // Find next available player number
+  let playerNumber = 1;
+  const usedNumbers = new Set(Object.values(gameState.players).map(p => p.playerNumber));
+  while (usedNumbers.has(playerNumber)) playerNumber++;
+  
+  // Determine color based on player count
   const colorIndex = Object.keys(gameState.players).length % gameState.playerColors.length;
   
-  // Add a new player object to the state
+  // Create new player
   gameState.players[playerId] = {
-    x: 4,       // Starting X position
-    y: 0,       // Starting Y position
-    score: 0,
+    id: playerId.substring(0, 4),
+    playerNumber: playerNumber,
+    isReady: false,
     color: gameState.playerColors[colorIndex],
+    score: 0,
+    x: 4, y: 0,
     currentPiece: getRandomTetromino(),
-    id: playerId.substring(0, 4), // Use first 4 chars of socket ID as player identifier
-    playerNumber: Object.keys(gameState.players).length + 1, // Assign player number based on join order
-    isReady: false, // Player readiness state
-
-    // 2:48pm properties new
-    fallSpeed: 45,
-    fallTimer: 0,
+    fallSpeed: 45, fallTimer: 0,
     softDropSpeed: 5,
-
-    // 3:08pm new
-    dasDirection: null, // 'left', 'right', or null
-    dasTimer: 0,
-    dasRepeatTimer: 0,
-
-    // 3:18pm new
-    lockTimer : 0,
-    isLocking: false
+    dasDirection: null, dasTimer: 0, dasRepeatTimer: 0,
+    lockTimer: 0, isLocking: false,
+    entryDelayTimer: 0, isWaitingForNextPiece: false,
+    lockResets: 0
   };
   
-  // Return updated game state
+  gameState.activePlayers.add(playerId);
   return gameState;
 }
 
 function handleDisconnect(gameState, playerId) {
+  // Remove from active players
+  gameState.activePlayers.delete(playerId);
   const player = gameState.players[playerId];
   
   if (player) {
-    // If the game is in progress, save the player's data for possible rejoin
+    // Remove from ready players
+    gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== playerId);
+    
+    // If game in progress, save player data for potential rejoin
     if (gameState.appPhase === 'playing') {
+      // Save player data for potential rejoin
       gameState.disconnectedPlayers[player.id] = {
-        ...player,
-        originalId: playerId, // Save the original socket ID
+        playerNumber: player.playerNumber,
+        color: player.color,
+        score: player.score,
+        originalId: playerId,
         disconnectedAt: Date.now()
       };
       
-      console.log(`Player ${player.id} disconnected during game and data saved for rejoin`);
+      // Remove current piece
+      if (player.currentPiece) {
+        player.currentPiece = null;
+        console.log(`Removed piece for disconnected player ${playerId}`);
+      }
+      
+      // Remove player from active game
+      delete gameState.players[playerId];
+      
+      // Check if all players have disconnected
+      if (gameState.activePlayers.size === 0) {
+        // End the game
+        gameState.appPhase = 'homescreen';
+        gameState.gameInProgress = false;
+        gameState.disconnectedPlayers = {};
+        console.log('All players disconnected, ending game');
+      }
+    } else {
+      // Just remove the player if not in a game
+      delete gameState.players[playerId];
     }
-    
-    // Remove the player from the active players list
-    delete gameState.players[playerId];
   }
   
   return gameState;
 }
 
-// Add this function to gameState.js
-function isValidMoveOnBoard(board, tetromino, x, y, currentPlayerId) {
-  const shape = tetromino.shape;
+function isValidMoveOnBoard(board, tetromino, x, y) {
+  if (!tetromino || !tetromino.shape) return false;
   
-  // Check each cell of the tetromino
-  for (let r = 0; r < shape.length; r++) {
-    for (let c = 0; c < shape[r].length; c++) {
-      if (shape[r][c] !== 0) {
-        const boardX = x + c;
-        const boardY = y + r;
+  for (let r = 0; r < tetromino.shape.length; r++) {
+    for (let c = 0; c < tetromino.shape[r].length; c++) {
+      if (tetromino.shape[r][c] !== 0) {
+        const boardX = x + c, boardY = y + r;
         
-        // Check boundaries
-        if (boardX < 0 || boardX >= board[0].length || boardY >= board.length) {
-          return false;
-        }
-        
-        // Check if there's already a piece on the board (locked pieces only)
-        if (boardY >= 0 && board[boardY][boardX] !== 0) {
-          return false;
-        }
+        // Check boundaries and collisions with locked pieces
+        if (boardX < 0 || boardX >= board[0].length || boardY >= board.length) return false;
+        if (boardY >= 0 && board[boardY][boardX] !== 0) return false;
       }
     }
   }
   return true;
 }
 
-// Don't forget to export it
-module.exports = {
-  // ...existing exports
-  isValidMoveOnBoard
-};
-
-// Check if a move is valid (no collision with walls or other pieces)
-// Update the isValidMove function to account for other players' active pieces
 function isValidMove(board, tetromino, x, y, currentPlayerId, allPlayers) {
-  const shape = tetromino.shape;
+  // Safety check for tetromino
+  if (!tetromino || !tetromino.shape) return false;
   
-  // Check each cell of the tetromino
-  for (let r = 0; r < shape.length; r++) {
-    for (let c = 0; c < shape[r].length; c++) {
-      if (shape[r][c] !== 0) {
-        const boardX = x + c;
-        const boardY = y + r;
+  // First check board boundaries and locked pieces
+  if (!isValidMoveOnBoard(board, tetromino, x, y)) return false;
+  
+  // Then check for collisions with other players' active pieces
+  for (let r = 0; r < tetromino.shape.length; r++) {
+    for (let c = 0; c < tetromino.shape[r].length; c++) {
+      if (tetromino.shape[r][c] !== 0) {
+        const boardX = x + c, boardY = y + r;
         
-        // Check boundaries
-        if (boardX < 0 || boardX >= board[0].length || boardY >= board.length) {
-          return false;
-        }
+        // Skip if this cell is above the board
+        if (boardY < 0) continue;
         
-        // Check if there's already a piece on the board
-        if (boardY >= 0 && board[boardY][boardX] !== 0) {
-          return false;
-        }
-        
-        // NEW: Check for collision with other players' active pieces
-        if (allPlayers && boardY >= 0) {
-          // Check each player's active piece
-          for (const playerId in allPlayers) {
-            // Skip the current player
-            if (playerId === currentPlayerId) continue;
-            
-            const otherPlayer = allPlayers[playerId];
-            // Skip players waiting for next piece
-            if (otherPlayer.isWaitingForNextPiece) continue;
-            
-            const otherPiece = otherPlayer.currentPiece;
-            if (!otherPiece) continue;
-            
-            // Check if this space is occupied by the other player's piece
-            for (let pr = 0; pr < otherPiece.shape.length; pr++) {
-              for (let pc = 0; pc < otherPiece.shape[pr].length; pc++) {
-                if (otherPiece.shape[pr][pc] !== 0) {
-                  const otherX = otherPlayer.x + pc;
-                  const otherY = otherPlayer.y + pr;
-                  
-                  // If positions match, we have a collision
-                  if (boardX === otherX && boardY === otherY) {
-                    return false;
-                  }
-                }
+        // Check each player's active piece
+        for (const playerId in allPlayers) {
+          const otherPlayer = allPlayers[playerId];
+          
+          // Skip current player and players without pieces
+          if (playerId === currentPlayerId || !otherPlayer.currentPiece || 
+              otherPlayer.isWaitingForNextPiece) continue;
+          
+          // Check collision with other player's piece
+          for (let pr = 0; pr < otherPlayer.currentPiece.shape.length; pr++) {
+            for (let pc = 0; pc < otherPlayer.currentPiece.shape[pr].length; pc++) {
+              if (otherPlayer.currentPiece.shape[pr][pc] !== 0) {
+                const otherX = otherPlayer.x + pc, otherY = otherPlayer.y + pr;
+                
+                // If positions match, we have a collision
+                if (boardX === otherX && boardY === otherY) return false;
               }
             }
           }
@@ -241,78 +469,71 @@ function isValidMove(board, tetromino, x, y, currentPlayerId, allPlayers) {
   return true;
 }
 
-// Place a tetromino on the board
 function placeTetromino(board, tetromino, x, y, playerId) {
-  const shape = tetromino.shape;
-  // Create a copy of the board so we don't modify the original
-  const newBoard = board.map(row => [...row]);
+  if (!tetromino || !tetromino.shape) return board;
   
-  for (let r = 0; r < shape.length; r++) {
-    for (let c = 0; c < shape[r].length; c++) {
-      if (shape[r][c] !== 0 && y + r >= 0) {
-        newBoard[y + r][x + c] = {
-          value: shape[r][c],
-          playerId: playerId
-        };
+  const newBoard = board.map(row => [...row]);
+  for (let r = 0; r < tetromino.shape.length; r++) {
+    for (let c = 0; c < tetromino.shape[r].length; c++) {
+      if (tetromino.shape[r][c] !== 0 && y + r >= 0) {
+        newBoard[y + r][x + c] = { value: tetromino.shape[r][c], playerId };
       }
     }
   }
   return newBoard;
 }
 
-// Rotate a tetromino (90 degrees clockwise)
+// Replace the existing rotateTetromino function:
+
 function rotateTetromino(tetromino) {
-  const newShape = [];
-  for (let c = 0; c < tetromino.shape[0].length; c++) {
-    const newRow = [];
-    for (let r = tetromino.shape.length - 1; r >= 0; r--) {
-      newRow.push(tetromino.shape[r][c]);
-    }
-    newShape.push(newRow);
+  const { type, rotationIndex } = tetromino;
+  const tetrominoData = TETROMINOES[type];
+  
+  if (!tetrominoData || !tetrominoData.rotations) {
+    console.error(`Invalid tetromino type: ${type}`);
+    return tetromino;
   }
   
+  // Calculate next rotation index (0 -> 1 -> 2 -> 3 -> 0)
+  const nextRotationIndex = (rotationIndex + 1) % tetrominoData.rotations.length;
+  
+  // Return a new tetromino object with the rotated shape
   return {
     ...tetromino,
-    shape: newShape
+    shape: tetrominoData.rotations[nextRotationIndex],
+    rotationIndex: nextRotationIndex
   };
 }
 
-// Check for completed lines and clear them
+
+
 function clearLines(gameState) {
   const board = gameState.board;
   const linesToClear = [];
   
   // Find completed lines
   for (let row = 0; row < board.length; row++) {
-    if (board[row].every(cell => cell !== 0)) {
-      linesToClear.push(row);
-    }
+    if (board[row].every(cell => cell !== 0)) linesToClear.push(row);
   }
   
-  // If we found lines to clear, start the clear animation
+  // Start clear animation
   if (linesToClear.length > 0) {
     gameState.lineClearActive = true;
     gameState.lineClearTimer = 0;
     gameState.linesToClear = linesToClear;
-    
-    // Highlight the lines to be cleared
-    // This is for visual effect - the actual clearing happens after animation
   }
   
-  return { 
-    newBoard: board,
-    linesCleared: linesToClear.length 
-  };
+  return { newBoard: board, linesCleared: linesToClear.length };
 }
 
 function handlePlayerAction(gameState, playerId, action) {
   const player = gameState.players[playerId];
-  if (!player) return gameState; // Safety check, player might not exist
+  if (!player || !player.currentPiece) return gameState;
   
   let { x, y } = player;
   let { currentPiece } = player;
   const board = gameState.board;
-  let successfulMove = false; // Track if move was successful
+  let successfulMove = false;
   
   switch (action.type) {
     case 'moveLeft':
@@ -340,19 +561,15 @@ function handlePlayerAction(gameState, playerId, action) {
     case 'drop':
       // Move down until collision
       let newY = y;
-      while (isValidMoveOnBoard(board, currentPiece, x, newY + 1, playerId, gameState.players)) {
-        newY++;
-      }
+      while (isValidMove(board, currentPiece, x, newY + 1, playerId, gameState.players)) newY++;
       
-      // Place the piece on the board
+      // Place the piece and clear lines
       gameState.board = placeTetromino(board, currentPiece, x, newY, playerId);
-      
-      // Clear any completed lines
       const { newBoard, linesCleared } = clearLines(gameState);
       gameState.board = newBoard;
       player.score += linesCleared * 100;
       
-      // Use entry delay for next piece (just like hardDrop)
+      // Prepare for next piece
       player.isWaitingForNextPiece = true;
       player.entryDelayTimer = 0;
       break;
@@ -360,43 +577,34 @@ function handlePlayerAction(gameState, playerId, action) {
     case 'hardDrop':
       // Move down until collision
       let hardDropY = y;
-      while (isValidMoveOnBoard(board, currentPiece, x, hardDropY + 1, playerId, gameState.players)) {
+      while (isValidMove(board, currentPiece, x, hardDropY + 1, playerId, gameState.players)) {
         hardDropY++;
-        // Award more points for hard drop (optional)
-        player.score += 2;
+        player.score += 2; // Award points for hard drop
       }
       
-      // Place the piece on the board
+      // Place the piece and clear lines
       gameState.board = placeTetromino(board, currentPiece, x, hardDropY, playerId);
-      
-      // Clear any completed lines
       const { newBoard: updatedBoard, linesCleared: clearedLines } = clearLines(gameState);
       gameState.board = updatedBoard;
       player.score += clearedLines * 100;
       
-      // Start entry delay for next piece
+      // Prepare for next piece
       player.isWaitingForNextPiece = true;
       player.entryDelayTimer = 0;
       break;
       
     case 'softDrop':
-      // If valid move downward
       if (isValidMove(board, currentPiece, x, y + 1, playerId, gameState.players)) {
         player.y += 1;
-        // Award points for soft drop (optional)
-        player.score += 1;
+        player.score += 1; // Award points for soft drop
       }
-      // Set fall speed to faster rate while button is held
       player.fallSpeed = player.softDropSpeed;
       break;
     
-    // Add this new case for handling key up of down arrow
     case 'endSoftDrop':
-      // Reset to normal fall speed
-      player.fallSpeed = 45; // normal speed
+      player.fallSpeed = 45; // Reset to normal fall speed
       break;
 
-    // Server-side: Add to handlePlayerAction 3:11pm
     case 'startDAS':
       player.dasDirection = action.direction;
       player.dasTimer = 0;
@@ -411,15 +619,10 @@ function handlePlayerAction(gameState, playerId, action) {
       console.log(`Unknown action type: ${action.type}`);
   }
 
-  // Reset lock timer when player successfully moves/rotates during lock delay
+  // Reset lock timer on successful move during lock delay
   if (successfulMove && player.isLocking) {
-    // Give the player more time by resetting lock delay
-    // We'll use a max of 15 resets to prevent infinite lock delay
     const MAX_LOCK_RESETS = 15;
-    
-    if (!player.lockResets) {
-      player.lockResets = 0;
-    }
+    if (!player.lockResets) player.lockResets = 0;
     
     if (player.lockResets < MAX_LOCK_RESETS) {
       player.lockTimer = 0;
@@ -427,7 +630,6 @@ function handlePlayerAction(gameState, playerId, action) {
     }
   }
   
-  // Return the updated game state
   return gameState;
 }
 
@@ -439,9 +641,10 @@ module.exports = {
   TETROMINOES,
   getRandomTetromino,
   isValidMove,
-  isValidMoveOnBoard,  // Add this line
+  isValidMoveOnBoard,
   placeTetromino, 
   rotateTetromino,
   clearLines,
-  createEmptyBoard
+  createEmptyBoard,
+  getBoardDimensions
 };

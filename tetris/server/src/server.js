@@ -1,35 +1,45 @@
-// server/src/server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const {
-  createGameState,
-  handleNewPlayer,
-  handleDisconnect,
-  handlePlayerAction,
-  isValidMove,
-  isValidMoveOnBoard, // Add this import
-  getRandomTetromino,
-  placeTetromino,
-  clearLines,
-  createEmptyBoard
+  createGameState, handleNewPlayer, handleDisconnect, handlePlayerAction, isValidMove,
+  isValidMoveOnBoard, getRandomTetromino, placeTetromino, clearLines, createEmptyBoard, getBoardDimensions
 } = require('./gameState');
 
+const fs = require('fs');
+const path = require('path');
+
+// Load configuration file
+let config;
+try {
+  const configPath = path.resolve(__dirname, '..', 'config.json');
+  const configData = fs.readFileSync(configPath, 'utf8');
+  config = JSON.parse(configData);
+  console.log('Server configuration loaded');
+} catch (error) {
+  console.warn('Error loading server config.json, using defaults:', error.message);
+  config = {
+    ip: '0.0.0.0',
+    port: 3001,
+    cors: {
+      origin: "*"
+    }
+  };
+}
+
+
 // Constants for game mechanics
-const FRAME_RATE = 60;
-const FRAME_DELAY = 1000 / FRAME_RATE; // ~16.67ms
-const LOCK_DELAY = 30; // 30 frames (0.5 seconds)
-const DAS_DELAY = 12; // 12 frames before auto-repeat
-const DAS_REPEAT = 2; // 2 frames between repeats
-const LINE_CLEAR_DELAY = 30; // 30 frames (0.5 seconds) 3:30pm
-const ENTRY_DELAY = 15; // 15 frames (0.25 seconds) - Add this line
+const FRAME_RATE = 60, FRAME_DELAY = 1000 / FRAME_RATE;
+const LOCK_DELAY = 30, DAS_DELAY = 12, DAS_REPEAT = 2, LINE_CLEAR_DELAY = 30, ENTRY_DELAY = 15;
 
 // Create our initial game state (empty board, no players)
 let gameState = createGameState();
+let gameLoop;
 
-// Modify piece locking function
+// Improved piece locking function
 function handlePieceLocking(gameState, playerId) {
   const player = gameState.players[playerId];
+  if (!player || !player.currentPiece) return gameState;
   
   // Place the current piece on the board
   gameState.board = placeTetromino(gameState.board, player.currentPiece, player.x, player.y, playerId);
@@ -43,52 +53,50 @@ function handlePieceLocking(gameState, playerId) {
   player.isWaitingForNextPiece = true;
   player.entryDelayTimer = 0;
   
-  // IMPROVED: Collect affected players first to avoid recursive calls
+  // Collect affected players first to avoid recursive calls
   const playersToLock = [];
   
-  Object.keys(gameState.players).forEach(otherPlayerId => {
+  // Only check active players for collisions
+  Array.from(gameState.activePlayers).forEach(otherPlayerId => {
     if (otherPlayerId !== playerId) {
       const otherPlayer = gameState.players[otherPlayerId];
+      if (!otherPlayer || !otherPlayer.currentPiece || otherPlayer.isWaitingForNextPiece) return;
       
-      // Skip players waiting for a new piece
-      if (otherPlayer.isWaitingForNextPiece) return;
-      
-      // Check if this player's piece is now in an invalid position
-      if (!isValidMove(gameState.board, otherPlayer.currentPiece, otherPlayer.x, otherPlayer.y, otherPlayerId, gameState.players)) {
-        console.log(`Collision detected for player ${otherPlayerId} after piece lock`);
-        playersToLock.push(otherPlayerId);
+      try {
+        if (!isValidMove(gameState.board, otherPlayer.currentPiece, otherPlayer.x, otherPlayer.y, otherPlayerId, gameState.players)) {
+          console.log(`Collision detected for player ${otherPlayerId} after piece lock`);
+          playersToLock.push(otherPlayerId);
+        }
+      } catch (error) {
+        console.error(`Error checking collision for player ${otherPlayerId}:`, error);
       }
     }
   });
   
-  // Now lock the affected pieces in sequence
+  // Lock the affected pieces in sequence
   playersToLock.forEach(idToLock => {
     const playerToLock = gameState.players[idToLock];
+    if (!playerToLock || !playerToLock.currentPiece) return;
     
-    // Place the piece directly without recursive call
     gameState.board = placeTetromino(gameState.board, playerToLock.currentPiece, playerToLock.x, playerToLock.y, idToLock);
-    
-    // Start entry delay for new piece
     playerToLock.isWaitingForNextPiece = true;
     playerToLock.entryDelayTimer = 0;
-    
     console.log(`Forced lock for player ${idToLock}`);
   });
   
-  // If any lines were cleared during force locking, process them
+  // Handle lines cleared during force locking
   if (playersToLock.length > 0) {
     const { newBoard: updatedBoard, linesCleared: additionalLines } = clearLines(gameState);
     gameState.board = updatedBoard;
     
-    // Distribute points to the original player who caused the lock chain
     if (additionalLines > 0) {
       player.score += additionalLines * 100;
       console.log(`Player ${playerId} got ${additionalLines} additional lines from chain reaction`);
     }
   }
+  
+  return gameState;
 }
-
-let gameLoop;
 
 function updateGameState() {
   // Handle line clear animations
@@ -98,8 +106,6 @@ function updateGameState() {
     if (gameState.lineClearTimer >= LINE_CLEAR_DELAY) {
       // Animation finished, actually clear the lines
       const newBoard = [...gameState.board];
-      
-      // Remove the cleared lines
       gameState.linesToClear.forEach(rowIndex => {
         newBoard.splice(rowIndex, 1);
         newBoard.unshift(new Array(gameState.board[0].length).fill(0));
@@ -109,120 +115,119 @@ function updateGameState() {
       gameState.lineClearActive = false;
       gameState.linesToClear = [];
     }
-    
-    // Skip other game updates during line clear
-    return;
+    return; // Skip other game updates during line clear
   }
 
-  // Helper function to check if a piece is touching the ground or locked pieces only
-  // (ignores collisions with other player's active pieces)
-  function isTouchingGround(board, piece, x, y, playerId) {
-    // Check if the piece would collide with the bottom or with locked pieces
+  // Helper function to check if a piece is touching the ground or locked pieces
+  function isTouchingGround(board, piece, x, y) {
+    if (!piece || !piece.shape) return false;
+    
     for (let r = 0; r < piece.shape.length; r++) {
       for (let c = 0; c < piece.shape[r].length; c++) {
         if (piece.shape[r][c]) {
-          const boardY = y + r + 1; // Position below current cell
-          const boardX = x + c;
+          const boardY = y + r + 1, boardX = x + c;
           
-          // Check if touching bottom
-          if (boardY >= board.length) {
-            return true;
-          }
-          
-          // Check if touching another piece on the board (locked piece)
-          if (board[boardY] && board[boardY][boardX] !== 0) {
-            return true;
-          }
+          // Check if touching bottom or another piece
+          if (boardY >= board.length) return true;
+          if (board[boardY] && board[boardY][boardX] !== 0) return true;
         }
       }
     }
     return false;
   }
 
-  // Helper function to reset player state
-  function resetPlayer(gameState, playerId) {
-    const player = gameState.players[playerId];
-    if (!player) return gameState;
-    
-    player.currentPiece = getRandomTetromino();
-    player.x = 4;
-    player.y = 0;
-    player.score = 0;
-    player.lockTimer = 0;
-    player.isLocking = false;
-    player.lockResets = 0;
-    player.fallSpeed = 45; // Normal speed
-    player.softDropSpeed = 5; // Fast speed when soft dropping
-    player.fallTimer = 0;
-    
-    return gameState;
-  }
-
   // Process each player
   Object.keys(gameState.players).forEach(playerId => {
     const player = gameState.players[playerId];
+    if (!player || !player.currentPiece) return;
     
     // Handle entry delay for new pieces
     if (player.isWaitingForNextPiece) {
       player.entryDelayTimer++;
       
-    // In the updateGameState function where it checks for game over
-    if (player.entryDelayTimer >= ENTRY_DELAY) {
-      // Spawn new piece after delay
-      player.currentPiece = getRandomTetromino();
-      player.x = 4;
-      player.y = 0;
-      player.isWaitingForNextPiece = false;
-      console.log(`New piece spawned for player ${playerId}: ${player.currentPiece.type}`);
-      
-      // CHANGE THIS LINE: Only check for collisions with the board and locked pieces, 
-      // not with other players' active pieces
-      if (!isValidMoveOnBoard(gameState.board, player.currentPiece, player.x, player.y, playerId)) {
-          console.log(`Game over for player ${playerId}`);
+      if (player.entryDelayTimer >= ENTRY_DELAY) {
+        // Spawn new piece after delay
+        player.currentPiece = getRandomTetromino();
+        
+        // Use player's specific spawn position instead of hardcoded position
+        const playerIndex = Array.from(gameState.activePlayers).indexOf(playerId);
+        const spawnPos = getSpawnPosition(playerIndex, gameState.board[0].length, gameState.activePlayers.size);
+        player.x = spawnPos.x;
+        player.y = spawnPos.y;
+        
+        player.isWaitingForNextPiece = false;
+        
+        // Check for game over condition
+        if (!isValidMoveOnBoard(gameState.board, player.currentPiece, player.x, player.y, playerId)) {
+          if (gameState.appPhase === 'playing') {
+            console.log(`Game over for player ${playerId}`);
+            gameState.appPhase = 'gameover';
+            
+            io.emit('gameOver', { playerId, score: player.score });
           
-          // Trigger game over state
-          gameState.appPhase = 'gameover';
-          
-          // Send game over notification
-          io.emit('gameOver', {
-            playerId: playerId,
-            score: player.score
-          });
-    
-          // Set timeout to return to homescreen after 5 seconds
+          // Reset game after timeout
           setTimeout(() => {
-            // Stop the game loop
-            clearInterval(gameLoop);
-            
-            // Reset game state
-            gameState.appPhase = 'homescreen';
-            gameState.readyPlayers = [];
-            gameState.board = createEmptyBoard(20, 10);
-            
-            // Reset all players
+            // First, save player ready states before resetting
+            const playerReadyStates = {};
             Object.keys(gameState.players).forEach(id => {
-              const p = gameState.players[id];
-              p.isReady = false;
-              p.isWaitingForNextPiece = false;
-              p.currentPiece = getRandomTetromino();
-              p.x = 4;
-              p.y = 0;
-              p.score = 0;
+              // Track if they had pressed ready before the game
+              playerReadyStates[id] = gameState.readyPlayers.includes(id);
             });
             
-            // Emit updated state
-            io.emit('gameState', gameState);
+            clearInterval(gameLoop);
             
-            // Restart a simplified game loop for the homescreen
-            gameLoop = setInterval(() => {
+            // Save connected players before resetting
+            const connectedPlayerIds = Object.keys(gameState.players);
+            const playerData = {};
+            
+            // Save essential data for each player
+            connectedPlayerIds.forEach(id => {
+              playerData[id] = {
+                id: gameState.players[id].id,
+                playerNumber: gameState.players[id].playerNumber,
+                color: gameState.players[id].color
+              };
+            });
+            
+            // Create fresh game state
+            const newGameState = createGameState();
+            
+            // Track all socket IDs currently connected to the server
+            const connectedSockets = Array.from(io.sockets.sockets.keys());
+            
+            // Re-add all connected players 
+            connectedSockets.forEach(socketId => {
+              if (playerData[socketId]) {
+                newGameState.players[socketId] = {
+                  id: playerData[socketId].id,
+                  playerNumber: playerData[socketId].playerNumber,
+                  color: playerData[socketId].color,
+                  isReady: false, // Always start not ready
+                  score: 0
+                };
+              } else {
+                handleNewPlayer(newGameState, socketId);
+              }
+            });
+            
+            // Wait a short delay before sending the new state
+            // This ensures clients have finished processing the game over
+            setTimeout(() => {
+              // Update gameState with our new state
+              gameState = newGameState;
+              gameState.appPhase = 'homescreen';
+              gameState.gameInProgress = false;
+              
+              // Send updated game state to all players
               io.emit('gameState', gameState);
-            }, FRAME_DELAY);
+              gameLoop = setInterval(() => { io.emit('gameState', gameState); }, FRAME_DELAY);
+            }, 500); // Small delay to avoid race conditions
           }, 5000);
+        }
           
-          return;
+        return;
         }
       }
-      
       return; // Skip regular fall logic while waiting
     } 
     
@@ -231,24 +236,13 @@ function updateGameState() {
       player.dasTimer++;
       
       if (player.dasTimer >= DAS_DELAY) {
-        // DAS activated, handle repeats
         player.dasRepeatTimer++;
         
         if (player.dasRepeatTimer >= DAS_REPEAT) {
-          // Time for another movement
-          if (player.dasDirection === 'left') {
-            // Try to move left - including checking other player pieces
-            if (isValidMove(gameState.board, player.currentPiece, player.x - 1, player.y, playerId, gameState.players)) {
-              player.x -= 1;
-            }
-          } else if (player.dasDirection === 'right') {
-            // Try to move right - including checking other player pieces
-            if (isValidMove(gameState.board, player.currentPiece, player.x + 1, player.y, playerId, gameState.players)) {
-              player.x += 1;
-            }
+          const moveOffset = player.dasDirection === 'left' ? -1 : 1;
+          if (isValidMove(gameState.board, player.currentPiece, player.x + moveOffset, player.y, playerId, gameState.players)) {
+            player.x += moveOffset;
           }
-          
-          // Reset repeat timer
           player.dasRepeatTimer = 0;
         }
       }
@@ -257,10 +251,7 @@ function updateGameState() {
     // Regular falling logic
     player.fallTimer = (player.fallTimer || 0) + 1;
     
-    // First check if the piece can fall without hitting the ground or locked pieces
-    const isTouchingFloorOrLockedPiece = isTouchingGround(gameState.board, player.currentPiece, player.x, player.y, playerId);
-    
-    // Second check if the piece would collide with another player's piece
+    const isTouchingFloorOrLockedPiece = isTouchingGround(gameState.board, player.currentPiece, player.x, player.y);
     const canFallWithoutCollision = isValidMove(gameState.board, player.currentPiece, player.x, player.y + 1, playerId, gameState.players);
     
     if (!isTouchingFloorOrLockedPiece && canFallWithoutCollision) {
@@ -268,13 +259,11 @@ function updateGameState() {
       if (player.fallTimer >= player.fallSpeed) {
         player.y += 1;
         player.fallTimer = 0;
-        
-        // Reset lock state since we're not touching ground
         player.isLocking = false;
         player.lockTimer = 0;
       }
     } else if (isTouchingFloorOrLockedPiece) {
-      // Only start locking if touching ground or locked pieces, NOT other players' active pieces
+      // Start locking only if touching ground or locked pieces
       if (!player.isLocking) {
         player.isLocking = true;
         player.lockTimer = 0;
@@ -283,134 +272,253 @@ function updateGameState() {
       player.lockTimer++;
       
       if (player.lockTimer >= LOCK_DELAY) {
-        // Lock the piece and generate new one
         handlePieceLocking(gameState, playerId);
         player.isLocking = false;
       }
     } else {
-      // The piece can't fall but it's not touching ground (must be hitting another player's piece)
-      // Don't lock, just wait (pieces can hover in mid-air if blocked by other pieces)
+      // Piece can't fall but not touching ground - just wait
       player.fallTimer = 0;
     }
   });
 }
 
-
-// make it pretty easy hopefully to avoid locking issues.
-function startGameLoop() {
-  gameLoop = setInterval(() => {
-    // Update game state (piece falling, etc.)
-    updateGameState();
-    
-    // Broadcast updated state to all clients
-    io.emit('gameState', gameState);
-  }, FRAME_DELAY);
-}
-
-// Create an Express app and an HTTP server
+// Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, { 
+  cors: { 
+    origin: config.cors.origin,
+    methods: ["GET", "POST"] 
+  } 
+});
 
-// Attach Socket.IO to the HTTP server
-const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"]
+app.get('/test', (req, res) => { res.send('Server is running!'); });
+
+// Calculate spawn positions based on player number and board width
+function getSpawnPosition(playerIndex, boardWidth, playerCount) {
+  // For single player, use the standard Tetris position (middle-ish, at column 3)
+  if (playerCount === 1) {
+    return { x: 3, y: 0 }; // Standard Tetris spawn position
   }
-});
-
-// Add a test endpoint
-app.get('/test', (req, res) => {
-  res.send('Server is running!');
-});
+  
+  // For multiplayer games, distribute evenly across the board
+  switch (playerCount) {
+    case 2:
+      // Two players: 1/3 and 2/3 in
+      if (playerIndex === 0) return { x: Math.floor(boardWidth / 3) - 1, y: 0 };
+      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 3) - 1, y: 0 };
+      break;
+      
+    case 3:
+      // Three players: 1/4, 2/4, 3/4 in
+      if (playerIndex === 0) return { x: Math.floor(boardWidth / 4)-1, y: 0 };
+      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 4)-1, y: 0 };
+      if (playerIndex === 2) return { x: Math.floor(boardWidth * 3 / 4)-1, y: 0 };
+      break;
+      
+    case 4:
+      // Four players: 1/5, 2/5, 3/5, 4/5 in
+      if (playerIndex === 0) return { x: Math.floor(boardWidth / 5)-1, y: 0 };
+      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 5)-1, y: 0 };
+      if (playerIndex === 2) return { x: Math.floor(boardWidth * 3 / 5)-1, y: 0 };
+      if (playerIndex === 3) return { x: Math.floor(boardWidth * 4 / 5)-1, y: 0 };
+      break;
+      
+    default:
+      // Fallback: evenly distribute across the board
+      const segment = 1 / (playerCount + 1);
+      return { 
+        x: Math.floor(boardWidth * segment * (playerIndex + 1)), 
+        y: 0 
+      };
+  }
+  
+  // Fallback if not handled by cases above
+  return { x: Math.floor(boardWidth / 2) - 1, y: 0 };
+}
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
-  // Add this new player to our game state
+  // If game in progress, show "game in progress" screen but don't add them to game
+  if (gameState.appPhase === 'playing') {
+    // Send limited game state that shows "Game in Progress" message
+    const limitedState = {
+      appPhase: 'homescreen',
+      gameInProgress: true,
+      players: {},  // Empty players object
+      readyPlayers: [],
+      gameMode: gameState.gameMode
+    };
+    socket.emit('init', limitedState);
+    return;  // Don't add them to the active game
+  }
+
+  // Only add new players if no game is in progress
   gameState = handleNewPlayer(gameState, socket.id);
-
-  // Send the connecting player the current game state
   socket.emit('init', gameState);
-
-  // Broadcast the updated state to all players
   io.emit('gameState', gameState);
 
-  // Update the playerReady event handler
+  // Handle player ready state
   socket.on('playerReady', (isReady) => {
-    console.log(`Player ${socket.id} ready state: ${isReady}`);
     const player = gameState.players[socket.id];
-    if (player) {
-      player.isReady = isReady;
-      
-      // Make sure we're using socket.id not player.id (which is shortened)
-      // Update ready players list
-      if (isReady) {
-        // Only add if not already in the list
-        if (!gameState.readyPlayers.includes(socket.id)) {
-          gameState.readyPlayers.push(socket.id);
-        }
-      } else {
-        gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
+    if (!player) return;
+    
+    player.isReady = isReady;
+    
+    if (isReady) {
+      if (!gameState.readyPlayers.includes(socket.id)) {
+        gameState.readyPlayers.push(socket.id);
       }
-      
-      console.log('Ready players:', gameState.readyPlayers);
-      io.emit('gameState', gameState);
+    } else {
+      gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
     }
+    
+    io.emit('gameState', gameState);
   });
   
-  // Listen for game mode changes (only player 1 can change this)
+  // Handle game mode changes
   socket.on('setGameMode', (mode) => {
     const player = gameState.players[socket.id];
     if (player && player.playerNumber === 1) {
-      console.log(`Game mode changed to: ${mode}`);
       gameState.gameMode = mode;
       io.emit('gameState', gameState);
     }
   });
-  
-  socket.on('startGame', () => {
-    const player = gameState.players[socket.id];
-    if (player && player.playerNumber === 1) {
-      console.log('Game started by player 1');
-      gameState.appPhase = 'playing';
+
+
+  // Handle game start
+// Replace lines 333-334 with this:
+
+// Handle game start
+// Replace the problematic section in the startGame handler:
+
+// Replace the problematic section in the startGame handler:
+
+// Update the startGame handler:
+
+socket.on('startGame', () => {
+  const player = gameState.players[socket.id];
+  if (player && player.playerNumber === 1) {
+    console.log('Game started by player 1');
+    gameState.appPhase = 'playing';
+    gameState.gameInProgress = true;
+    
+    // Only use ready players for the game
+    const readyPlayers = Object.keys(gameState.players).filter(id => 
+      gameState.readyPlayers.includes(id));
+    
+    // Get the count of ONLY READY players - this is crucial
+    const readyPlayerCount = readyPlayers.length;
+    console.log(`Starting game with ${readyPlayerCount} ready players`);
+    
+    // Get board dimensions based on READY players only
+    const { rows, cols } = getBoardDimensions(readyPlayerCount);
+    gameState.board = createEmptyBoard(rows, cols);
+    
+    // Update activePlayers set with only ready players
+    gameState.activePlayers = new Set(readyPlayers);
+    
+    // Create a filtered game state that only includes ready players
+    // This is what we'll send to players in the game
+    const gameStateForActivePlayers = {
+      ...gameState,
+      players: {}
+    };
+    
+    // Copy only ready players to the filtered state
+    readyPlayers.forEach(id => {
+      gameStateForActivePlayers.players[id] = {...gameState.players[id]};
+    });
+    
+    // Initialize only ready players for the game
+    readyPlayers.forEach((id, index) => {
+      // Important: Calculate spawn based on THIS player's index among READY players
+      const spawnPos = getSpawnPosition(index, cols, readyPlayerCount);
       
-      // Reset the board before starting
-      gameState.board = createEmptyBoard(20, 10);
+      // Update both states
+      gameState.players[id].score = 0;
+      gameState.players[id].x = spawnPos.x;
+      gameState.players[id].y = spawnPos.y;
+      gameState.players[id].currentPiece = getRandomTetromino();
+      gameState.players[id].isWaitingForNextPiece = false;
+      gameState.players[id].isLocking = false;
+      gameState.players[id].lockTimer = 0;
+      gameState.players[id].fallTimer = gameState.players[id].fallSpeed - 1;
+      gameState.players[id].fallSpeed = 45; 
+      gameState.players[id].softDropSpeed = 5;
+      gameState.players[id].isActive = true;
       
-      // Reset all player scores and positions
-      Object.keys(gameState.players).forEach(id => {
-        if (gameState.readyPlayers.includes(id)) {
-          const p = gameState.players[id];
-          p.score = 0;
-          p.x = 4;
-          p.y = 0;
-          p.currentPiece = getRandomTetromino();
-          p.isWaitingForNextPiece = false;
-          p.isLocking = false;
-          p.lockTimer = 0;
-          p.fallTimer = 0;
+      // Same for filtered state
+      gameStateForActivePlayers.players[id] = {...gameState.players[id]};
+      
+      console.log(`Player ${id} (index ${index}) spawning at position (${spawnPos.x}, ${spawnPos.y})`);
+    });
+    
+    // Find non-ready players
+    const nonReadyPlayers = Object.keys(gameState.players).filter(id => 
+      !gameState.readyPlayers.includes(id));
+    
+    // Special limited state for non-ready players
+    const limitedState = {
+      appPhase: 'homescreen',
+      gameInProgress: true,
+      players: {}, 
+      readyPlayers: [],
+      gameMode: gameState.gameMode
+    };
+    
+    // Send appropriate state to each player
+    readyPlayers.forEach(id => {
+      const socket = io.sockets.sockets.get(id);
+      if (socket) {
+        // Send the filtered game state with only active players
+        socket.emit('gameState', gameStateForActivePlayers);
+      }
+    });
+    
+    nonReadyPlayers.forEach(id => {
+      const socket = io.sockets.sockets.get(id);
+      if (socket) {
+        socket.emit('gameState', limitedState);
+      }
+    });
+    
+    // Set up game loop
+    clearInterval(gameLoop);
+    gameLoop = setInterval(() => {
+      updateGameState();
+      
+      // Create a fresh filtered state for each update
+      const updatedGameStateForActive = {
+        ...gameState,
+        players: {}
+      };
+      
+      // Only include active players
+      readyPlayers.forEach(id => {
+        if (gameState.players[id]) {
+          updatedGameStateForActive.players[id] = {...gameState.players[id]};
         }
       });
       
-      // Stop any existing game loop
-      clearInterval(gameLoop);
-      
-      // Start the full game loop again
-      gameLoop = setInterval(() => {
-        updateGameState();
-        io.emit('gameState', gameState);
-      }, FRAME_DELAY);
-      
-      io.emit('gameState', gameState);
-    }
-  });
+      // Send filtered state to active players
+      readyPlayers.forEach(id => {
+        const socket = io.sockets.sockets.get(id);
+        if (socket) {
+          socket.emit('gameState', updatedGameStateForActive);
+        }
+      });
+    }, FRAME_DELAY);
+  }
+});
 
-  // Listen for actions from this player
+  // Handle player actions
   socket.on('playerAction', (action) => {
-    // Only process actions if we're in the playing phase
     if (gameState.appPhase === 'playing') {
-      console.log(`Player ${socket.id} action:`, action);
+      const player = gameState.players[socket.id];
+      if (!player) return;
+      
       gameState = handlePlayerAction(gameState, socket.id, action);
       io.emit('gameState', gameState);
     }
@@ -419,20 +527,16 @@ io.on('connection', (socket) => {
   // Handle player disconnects
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
-    
-    // Remove from ready players if present
     gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
-    
     gameState = handleDisconnect(gameState, socket.id);
     io.emit('gameState', gameState);
   });
 });
 
 // Start the server
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+const PORT = process.env.PORT || config.port;
+const IP = config.ip;
+server.listen(PORT, IP, () => { 
+  console.log(`Server is running on ${IP}:${PORT}`); 
+  console.log(`Players can connect to this server using the machine's network IP`);
 });
-
-// Start the game loop when the server starts
-//startGameLoop();s

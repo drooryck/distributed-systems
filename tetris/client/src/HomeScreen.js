@@ -7,20 +7,14 @@ const HomeScreen = ({
   onReady, 
   onStartGame, 
   onSetGameMode, 
-  gameMode 
+  gameMode,
+  gameInProgress,
+  isRejoining
 }) => {
-  // Add safety check for currentPlayerId
   const currentPlayerShortId = currentPlayerId ? currentPlayerId.substring(0, 4) : null;
-  
-  // Get the current player
-  const currentPlayer = currentPlayerShortId ? 
-    Object.values(players).find(p => p.id === currentPlayerShortId) : 
-    null;
-  
-  // Determine if the current player is player 1
+  const currentPlayer = currentPlayerShortId ? Object.values(players).find(p => p.id === currentPlayerShortId) : null;
   const isPlayerOne = currentPlayer && currentPlayer.playerNumber === 1;
   
-  // Available game modes
   const gameModes = [
     { id: 'classic', name: 'Classic Mode', disabled: false },
     { id: 'battle', name: 'Battle Mode', disabled: true },
@@ -28,12 +22,20 @@ const HomeScreen = ({
   ];
   
   return (
-    <div style={{ 
-      textAlign: 'center', 
-      maxWidth: '800px',
-      margin: '0 auto'
-    }}>
+    <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto' }}>
       <h1>Tetristributed</h1>
+      
+      {gameInProgress && (
+        <div style={{
+          backgroundColor: '#552233',
+          padding: '10px',
+          borderRadius: '5px',
+          marginBottom: '20px'
+        }}>
+          <h2>Game In Progress</h2>
+          <p>A game is currently in progress. Please wait for it to finish.</p>
+        </div>
+      )}
       
       <div style={{ 
         display: 'flex', 
@@ -42,11 +44,12 @@ const HomeScreen = ({
         flexWrap: 'wrap',
         gap: '20px'
       }}>
-        {/* Display player slots (up to 4) */}
         {[1, 2, 3, 4].map(num => {
           const player = Object.values(players).find(p => p.playerNumber === num);
-          const isReady = player && readyPlayers.includes(player.id);
+          const isReady = player && readyPlayers.some(id => players[id] && players[id].id === player.id);
           const isCurrentPlayer = player && currentPlayerShortId && player.id === currentPlayerShortId;
+          const isPlayerRejoining = isCurrentPlayer && player.isRejoining;
+          const bgColor = !player ? '#222' : '#444';
           
           return (
             <div key={num} style={{
@@ -55,48 +58,73 @@ const HomeScreen = ({
               border: '2px solid #555',
               borderRadius: '8px',
               padding: '10px',
-              backgroundColor: !player ? '#333' : isReady ? '#FF3333' : '#444',
-              position: 'relative'
+              backgroundColor: bgColor,
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column'
             }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
                 Player {num}
                 {isCurrentPlayer && ' (You)'}
               </div>
               
-              {player && (
-                <>
+              <div style={{ flex: 1 }}>
+                {player && isReady && (
                   <div style={{
                     width: '20px',
                     height: '20px',
                     backgroundColor: player.color,
-                    margin: '0 auto 10px'
+                    margin: '0 auto'
                   }}></div>
-                  
-                  {isCurrentPlayer && (
-                    <button 
-                      onClick={() => onReady(!isReady)}
-                      style={{
-                        backgroundColor: isReady ? '#333' : '#FF3333',
-                        border: 'none',
-                        color: 'white',
-                        padding: '5px 10px',
-                        borderRadius: '4px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {isReady ? 'Cancel' : 'Press X to Join'}
-                    </button>
-                  )}
-                </>
-              )}
+                )}
+                
+                {isPlayerRejoining && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '0',
+                    left: '0',
+                    right: '0',
+                    padding: '2px',
+                    backgroundColor: '#33AA33',
+                    color: 'white',
+                    fontSize: '12px',
+                    borderTopLeftRadius: '6px',
+                    borderTopRightRadius: '6px'
+                  }}>
+                    Welcome Back!
+                  </div>
+                )}
+                
+                {!player && <div>Waiting for player...</div>}
+                
+                {player && !isReady && !isCurrentPlayer && (
+                  <div style={{ fontSize: '14px', color: '#888' }}>Not Ready</div>
+                )}
+              </div>
               
-              {!player && <div>Waiting for player...</div>}
+              {isCurrentPlayer && (
+                <div style={{ marginTop: 'auto' }}>
+                  <button 
+                    onClick={() => onReady(!isReady)}
+                    style={{
+                      backgroundColor: isReady ? '#333' : '#FF3333',
+                      border: 'none',
+                      color: 'white',
+                      padding: '5px 10px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      width: '100%'
+                    }}
+                  >
+                    {isReady ? 'Cancel' : isPlayerRejoining ? 'Rejoin Game' : 'Press X'}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
       
-      {/* Game mode selection - only visible to player 1 */}
       {isPlayerOne && (
         <div style={{ marginBottom: '30px' }}>
           <h2>Game Mode</h2>
@@ -124,7 +152,6 @@ const HomeScreen = ({
         </div>
       )}
       
-      {/* Start game button - only visible to player 1 */}
       {isPlayerOne && (
         <button
           onClick={onStartGame}
