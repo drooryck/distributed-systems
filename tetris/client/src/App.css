@@ -1,0 +1,56 @@
+/* Base styles for the app */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #121212; /* Fallback color */
+}
+
+body {
+  overflow: hidden; /* Prevent scrollbars when background image is larger */
+}
+
+.background-image {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.4;
+  transition: background-image 1s ease-in-out;
+  z-index: -1;
+}
+
+/* Semi-transparent overlay for content */
+.content-container {
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(2px);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+p {
+  color: #eee;
+}
+
+/* Style for buttons */
+button {
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+button:active {
+  transform: translateY(0);
+}
