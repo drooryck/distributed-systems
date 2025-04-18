@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
-import GameBoard from './GameBoard';
+import BoardStage from './BoardStage';
 import HomeScreen from './HomeScreen';
 import GameOverScreen from './GameOverScreen';
 import ScorePanel from './ScorePanel';
@@ -406,10 +406,10 @@ function App() {
           
           <div style={{ display: 'flex', gap: '20px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <GameBoard 
+              <BoardStage 
                 board={gameState.board || []} 
                 players={gameState.players || {}}
-                currentPlayerId={socket?.id}
+                linesToClear={gameState.linesToClear || []}
               />
             </div>
             
