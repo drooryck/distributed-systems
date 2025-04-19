@@ -170,6 +170,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
 
   const active = useMemo(() =>
     Object.values(players).flatMap(p => {
+      if (p?.isWaitingForNextPiece) return [];
       const shp = p?.currentPiece?.shape;
       if (!shp) return [];
       return shp.flatMap((row, dr) =>
@@ -181,6 +182,8 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
             gy < 0 || gy >= rows ||
             (CLEAR_STYLE === 'explode' && linesToClear.includes(gy))
           ) return null;
+          // Skip rendering if the board already has a locked cell here
+          if (board[gy] && board[gy][gx] !== 0) return null;
           return { id: `a-${gx}-${gy}`, x: gx, y: gy, color: BASE[v] || '#888' };
         }).filter(Boolean)
       );
