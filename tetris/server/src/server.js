@@ -1,40 +1,87 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
-const {
-  createGameState, handleNewPlayer, handleDisconnect, handlePlayerAction, isValidMove,
-  isValidMoveOnBoard, getRandomTetromino, placeTetromino, clearLines, createEmptyBoard, getBoardDimensions
-} = require('./gameState');
-
-const fs = require('fs');
+const socketIO = require('socket.io');
+const cors = require('cors');
 const path = require('path');
 
-// Load configuration file
-let config;
-try {
-  const configPath = path.resolve(__dirname, '..', 'config.json');
-  const configData = fs.readFileSync(configPath, 'utf8');
-  config = JSON.parse(configData);
-  console.log('Server configuration loaded');
-} catch (error) {
-  console.warn('Error loading server config.json, using defaults:', error.message);
-  config = {
-    ip: '0.0.0.0',
-    port: 3001,
-    cors: {
-      origin: "*"
-    }
+// Import game state functions
+const { 
+  createGameState, 
+  handleNewPlayer, 
+  handleDisconnect, 
+  handlePlayerAction,
+  TETROMINOES,
+  getRandomTetromino,
+  isValidMove,
+  isValidMoveOnBoard,
+  placeTetromino,
+  clearLines,
+  createEmptyBoard,
+  getBoardDimensions
+} = require('./gameState');
+
+// Initialize Express app and HTTP server
+const app = express();
+app.use(cors());
+const server = http.createServer(app);
+
+// Serve static files from client build
+app.use(express.static(path.join(__dirname, '../../client/build')));
+
+// Initialize Socket.IO with CORS settings
+const io = socketIO(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+// Game configuration
+const FRAME_DELAY = 1000 / 60; // 60 FPS
+const LOCK_DELAY = 30; // frames to wait before locking a piece
+const ENTRY_DELAY = 12; // frames to wait before spawning a new piece
+const DAS_DELAY = 14; // frames to wait before auto-repeat kicks in
+const DAS_REPEAT = 2; // frames between auto-repeat moves
+
+// Create initial game state
+let gameState = createGameState();
+let gameLoop = null;
+
+// Get spawn position based on player index and board size
+function getSpawnPosition(playerIndex, boardWidth, totalPlayers) {
+  // For single player, spawn in the middle
+  if (totalPlayers === 1) return { x: Math.floor(boardWidth / 2) - 2, y: 0 };
+  
+  // For multiple players, divide the board into equal sections
+  const sectionWidth = Math.floor(boardWidth / totalPlayers);
+  return {
+    x: playerIndex * sectionWidth + Math.floor(sectionWidth / 2) - 2,
+    y: 0
   };
 }
 
-
-// Constants for game mechanics
-const FRAME_RATE = 60, FRAME_DELAY = 1000 / FRAME_RATE;
-const LOCK_DELAY = 30, DAS_DELAY = 12, DAS_REPEAT = 2, LINE_CLEAR_DELAY = 30, ENTRY_DELAY = 15;
-
-// Create our initial game state (empty board, no players)
-let gameState = createGameState();
-let gameLoop;
+// Check if a piece is touching the ground or a locked piece
+function isTouchingGround(board, tetromino, x, y) {
+  if (!tetromino || !tetromino.shape) return false;
+  
+  for (let r = 0; r < tetromino.shape.length; r++) {
+    for (let c = 0; c < tetromino.shape[r].length; c++) {
+      if (tetromino.shape[r][c] !== 0) {
+        const boardY = y + r + 1;
+        const boardX = x + c;
+        
+        // Check if we're at the bottom of the board
+        if (boardY >= board.length) return true;
+        
+        // Check if there's a piece below us
+        if (boardY >= 0 && boardX >= 0 && boardX < board[0].length) {
+          if (board[boardY][boardX] !== 0) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
 // Improved piece locking function
 function handlePieceLocking(gameState, playerId) {
@@ -98,46 +145,30 @@ function handlePieceLocking(gameState, playerId) {
   return gameState;
 }
 
+// Main game update function
 function updateGameState() {
-  // Handle line clear animations
+  // Handle ongoing line clear animation
   if (gameState.lineClearActive) {
     gameState.lineClearTimer++;
     
-    if (gameState.lineClearTimer >= LINE_CLEAR_DELAY) {
-      // Animation finished, actually clear the lines
+    // After animation completes, clear the lines
+    if (gameState.lineClearTimer >= 30) { // 30 frames = 0.5 seconds at 60fps
       const newBoard = [...gameState.board];
-      gameState.linesToClear.forEach(rowIndex => {
-        newBoard.splice(rowIndex, 1);
-        newBoard.unshift(new Array(gameState.board[0].length).fill(0));
-      });
+      
+      // Remove cleared lines
+      for (const row of gameState.linesToClear.sort((a, b) => b - a)) {
+        newBoard.splice(row, 1);
+        newBoard.unshift(new Array(newBoard[0].length).fill(0));
+      }
       
       gameState.board = newBoard;
       gameState.lineClearActive = false;
       gameState.linesToClear = [];
     }
-    return; // Skip other game updates during line clear
   }
-
-  // Helper function to check if a piece is touching the ground or locked pieces
-  function isTouchingGround(board, piece, x, y) {
-    if (!piece || !piece.shape) return false;
-    
-    for (let r = 0; r < piece.shape.length; r++) {
-      for (let c = 0; c < piece.shape[r].length; c++) {
-        if (piece.shape[r][c]) {
-          const boardY = y + r + 1, boardX = x + c;
-          
-          // Check if touching bottom or another piece
-          if (boardY >= board.length) return true;
-          if (board[boardY] && board[boardY][boardX] !== 0) return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  // Process each player
-  Object.keys(gameState.players).forEach(playerId => {
+  
+  // Process each active player
+  Array.from(gameState.activePlayers).forEach(playerId => {
     const player = gameState.players[playerId];
     if (!player || !player.currentPiece) return;
     
@@ -157,13 +188,21 @@ function updateGameState() {
         
         player.isWaitingForNextPiece = false;
         
+        // Reset the hard drop flag when spawning a new piece
+        player.justPerformedHardDrop = false;
+        
         // Check for game over condition
         if (!isValidMoveOnBoard(gameState.board, player.currentPiece, player.x, player.y, playerId)) {
           if (gameState.appPhase === 'playing') {
             console.log(`Game over for player ${playerId}`);
             gameState.appPhase = 'gameover';
             
-            io.emit('gameOver', { playerId, score: player.score });
+            // Send game over event
+            io.emit('gameOver', { 
+              playerId, 
+              score: player.score,
+              isCurrentPlayer: true
+            });
           
           // Reset game after timeout
           setTimeout(() => {
@@ -220,6 +259,8 @@ function updateGameState() {
               
               // Send updated game state to all players
               io.emit('gameState', gameState);
+              
+              // Start a simple loop to keep sending updates
               gameLoop = setInterval(() => { io.emit('gameState', gameState); }, FRAME_DELAY);
             }, 500); // Small delay to avoid race conditions
           }, 5000);
@@ -282,64 +323,10 @@ function updateGameState() {
   });
 }
 
-// Create Express app and HTTP server
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { 
-  cors: { 
-    origin: config.cors.origin,
-    methods: ["GET", "POST"] 
-  } 
-});
-
-app.get('/test', (req, res) => { res.send('Server is running!'); });
-
-// Calculate spawn positions based on player number and board width
-function getSpawnPosition(playerIndex, boardWidth, playerCount) {
-  // For single player, use the standard Tetris position (middle-ish, at column 3)
-  if (playerCount === 1) {
-    return { x: 3, y: 0 }; // Standard Tetris spawn position
-  }
-  
-  // For multiplayer games, distribute evenly across the board
-  switch (playerCount) {
-    case 2:
-      // Two players: 1/3 and 2/3 in
-      if (playerIndex === 0) return { x: Math.floor(boardWidth / 3) - 1, y: 0 };
-      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 3) - 1, y: 0 };
-      break;
-      
-    case 3:
-      // Three players: 1/4, 2/4, 3/4 in
-      if (playerIndex === 0) return { x: Math.floor(boardWidth / 4)-1, y: 0 };
-      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 4)-1, y: 0 };
-      if (playerIndex === 2) return { x: Math.floor(boardWidth * 3 / 4)-1, y: 0 };
-      break;
-      
-    case 4:
-      // Four players: 1/5, 2/5, 3/5, 4/5 in
-      if (playerIndex === 0) return { x: Math.floor(boardWidth / 5)-1, y: 0 };
-      if (playerIndex === 1) return { x: Math.floor(boardWidth * 2 / 5)-1, y: 0 };
-      if (playerIndex === 2) return { x: Math.floor(boardWidth * 3 / 5)-1, y: 0 };
-      if (playerIndex === 3) return { x: Math.floor(boardWidth * 4 / 5)-1, y: 0 };
-      break;
-      
-    default:
-      // Fallback: evenly distribute across the board
-      const segment = 1 / (playerCount + 1);
-      return { 
-        x: Math.floor(boardWidth * segment * (playerIndex + 1)), 
-        y: 0 
-      };
-  }
-  
-  // Fallback if not handled by cases above
-  return { x: Math.floor(boardWidth / 2) - 1, y: 0 };
-}
-
+// Handle Socket.IO connections
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-
+  console.log(`Player connected: ${socket.id}`);
+  
   // If game in progress, show "game in progress" screen but don't add them to game
   if (gameState.appPhase === 'playing') {
     // Send limited game state that shows "Game in Progress" message
@@ -386,132 +373,123 @@ io.on('connection', (socket) => {
     }
   });
 
-
   // Handle game start
-// Replace lines 333-334 with this:
-
-// Handle game start
-// Replace the problematic section in the startGame handler:
-
-// Replace the problematic section in the startGame handler:
-
-// Update the startGame handler:
-
-socket.on('startGame', () => {
-  const player = gameState.players[socket.id];
-  if (player && player.playerNumber === 1) {
-    console.log('Game started by player 1');
-    gameState.appPhase = 'playing';
-    gameState.gameInProgress = true;
-    
-    // Only use ready players for the game
-    const readyPlayers = Object.keys(gameState.players).filter(id => 
-      gameState.readyPlayers.includes(id));
-    
-    // Get the count of ONLY READY players - this is crucial
-    const readyPlayerCount = readyPlayers.length;
-    console.log(`Starting game with ${readyPlayerCount} ready players`);
-    
-    // Get board dimensions based on READY players only
-    const { rows, cols } = getBoardDimensions(readyPlayerCount);
-    gameState.board = createEmptyBoard(rows, cols);
-    
-    // Update activePlayers set with only ready players
-    gameState.activePlayers = new Set(readyPlayers);
-    
-    // Create a filtered game state that only includes ready players
-    // This is what we'll send to players in the game
-    const gameStateForActivePlayers = {
-      ...gameState,
-      players: {}
-    };
-    
-    // Copy only ready players to the filtered state
-    readyPlayers.forEach(id => {
-      gameStateForActivePlayers.players[id] = {...gameState.players[id]};
-    });
-    
-    // Initialize only ready players for the game
-    readyPlayers.forEach((id, index) => {
-      // Important: Calculate spawn based on THIS player's index among READY players
-      const spawnPos = getSpawnPosition(index, cols, readyPlayerCount);
+  socket.on('startGame', () => {
+    const player = gameState.players[socket.id];
+    if (player && player.playerNumber === 1) {
+      console.log('Game started by player 1');
+      gameState.appPhase = 'playing';
+      gameState.gameInProgress = true;
       
-      // Update both states
-      gameState.players[id].score = 0;
-      gameState.players[id].x = spawnPos.x;
-      gameState.players[id].y = spawnPos.y;
-      gameState.players[id].currentPiece = getRandomTetromino();
-      gameState.players[id].isWaitingForNextPiece = false;
-      gameState.players[id].isLocking = false;
-      gameState.players[id].lockTimer = 0;
-      gameState.players[id].fallTimer = gameState.players[id].fallSpeed - 1;
-      gameState.players[id].fallSpeed = 45; 
-      gameState.players[id].softDropSpeed = 5;
-      gameState.players[id].isActive = true;
+      // Only use ready players for the game
+      const readyPlayers = Object.keys(gameState.players).filter(id => 
+        gameState.readyPlayers.includes(id));
       
-      // Same for filtered state
-      gameStateForActivePlayers.players[id] = {...gameState.players[id]};
+      // Get the count of ONLY READY players - this is crucial
+      const readyPlayerCount = readyPlayers.length;
+      console.log(`Starting game with ${readyPlayerCount} ready players`);
       
-      console.log(`Player ${id} (index ${index}) spawning at position (${spawnPos.x}, ${spawnPos.y})`);
-    });
-    
-    // Find non-ready players
-    const nonReadyPlayers = Object.keys(gameState.players).filter(id => 
-      !gameState.readyPlayers.includes(id));
-    
-    // Special limited state for non-ready players
-    const limitedState = {
-      appPhase: 'homescreen',
-      gameInProgress: true,
-      players: {}, 
-      readyPlayers: [],
-      gameMode: gameState.gameMode
-    };
-    
-    // Send appropriate state to each player
-    readyPlayers.forEach(id => {
-      const socket = io.sockets.sockets.get(id);
-      if (socket) {
-        // Send the filtered game state with only active players
-        socket.emit('gameState', gameStateForActivePlayers);
-      }
-    });
-    
-    nonReadyPlayers.forEach(id => {
-      const socket = io.sockets.sockets.get(id);
-      if (socket) {
-        socket.emit('gameState', limitedState);
-      }
-    });
-    
-    // Set up game loop
-    clearInterval(gameLoop);
-    gameLoop = setInterval(() => {
-      updateGameState();
+      // Get board dimensions based on READY players only
+      const { rows, cols } = getBoardDimensions(readyPlayerCount);
+      gameState.board = createEmptyBoard(rows, cols);
       
-      // Create a fresh filtered state for each update
-      const updatedGameStateForActive = {
+      // Update activePlayers set with only ready players
+      gameState.activePlayers = new Set(readyPlayers);
+      
+      // Create a filtered game state that only includes ready players
+      // This is what we'll send to players in the game
+      const gameStateForActivePlayers = {
         ...gameState,
         players: {}
       };
       
-      // Only include active players
+      // Copy only ready players to the filtered state
       readyPlayers.forEach(id => {
-        if (gameState.players[id]) {
-          updatedGameStateForActive.players[id] = {...gameState.players[id]};
-        }
+        gameStateForActivePlayers.players[id] = {...gameState.players[id]};
       });
       
-      // Send filtered state to active players
+      // Initialize only ready players for the game
+      readyPlayers.forEach((id, index) => {
+        // Important: Calculate spawn based on THIS player's index among READY players
+        const spawnPos = getSpawnPosition(index, cols, readyPlayerCount);
+        
+        // Update both states
+        gameState.players[id].score = 0;
+        gameState.players[id].x = spawnPos.x;
+        gameState.players[id].y = spawnPos.y;
+        gameState.players[id].currentPiece = getRandomTetromino();
+        gameState.players[id].isWaitingForNextPiece = false;
+        gameState.players[id].isLocking = false;
+        gameState.players[id].lockTimer = 0;
+        gameState.players[id].fallTimer = gameState.players[id].fallSpeed - 1;
+        gameState.players[id].fallSpeed = 45; 
+        gameState.players[id].softDropSpeed = 5;
+        gameState.players[id].isActive = true;
+        gameState.players[id].justPerformedHardDrop = false;
+        
+        // Same for filtered state
+        gameStateForActivePlayers.players[id] = {...gameState.players[id]};
+        
+        console.log(`Player ${id} (index ${index}) spawning at position (${spawnPos.x}, ${spawnPos.y})`);
+      });
+      
+      // Find non-ready players
+      const nonReadyPlayers = Object.keys(gameState.players).filter(id => 
+        !gameState.readyPlayers.includes(id));
+      
+      // Special limited state for non-ready players
+      const limitedState = {
+        appPhase: 'homescreen',
+        gameInProgress: true,
+        players: {}, 
+        readyPlayers: [],
+        gameMode: gameState.gameMode
+      };
+      
+      // Send appropriate state to each player
       readyPlayers.forEach(id => {
         const socket = io.sockets.sockets.get(id);
         if (socket) {
-          socket.emit('gameState', updatedGameStateForActive);
+          // Send the filtered game state with only active players
+          socket.emit('gameState', gameStateForActivePlayers);
         }
       });
-    }, FRAME_DELAY);
-  }
-});
+      
+      nonReadyPlayers.forEach(id => {
+        const socket = io.sockets.sockets.get(id);
+        if (socket) {
+          socket.emit('gameState', limitedState);
+        }
+      });
+      
+      // Set up game loop
+      clearInterval(gameLoop);
+      gameLoop = setInterval(() => {
+        updateGameState();
+        
+        // Create a fresh filtered state for each update
+        const updatedGameStateForActive = {
+          ...gameState,
+          players: {}
+        };
+        
+        // Only include active players
+        readyPlayers.forEach(id => {
+          if (gameState.players[id]) {
+            updatedGameStateForActive.players[id] = {...gameState.players[id]};
+          }
+        });
+        
+        // Send filtered state to active players
+        readyPlayers.forEach(id => {
+          const socket = io.sockets.sockets.get(id);
+          if (socket) {
+            socket.emit('gameState', updatedGameStateForActive);
+          }
+        });
+      }, FRAME_DELAY);
+    }
+  });
 
   // Handle player actions
   socket.on('playerAction', (action) => {
@@ -520,23 +498,19 @@ socket.on('startGame', () => {
       if (!player) return;
       
       gameState = handlePlayerAction(gameState, socket.id, action);
-      io.emit('gameState', gameState);
     }
   });
 
   // Handle player disconnects
   socket.on('disconnect', () => {
-    console.log(`Client disconnected: ${socket.id}`);
-    gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== socket.id);
+    console.log(`Player disconnected: ${socket.id}`);
     gameState = handleDisconnect(gameState, socket.id);
     io.emit('gameState', gameState);
   });
 });
 
-// Start the server
-const PORT = process.env.PORT || config.port;
-const IP = config.ip;
-server.listen(PORT, IP, () => { 
-  console.log(`Server is running on ${IP}:${PORT}`); 
-  console.log(`Players can connect to this server using the machine's network IP`);
+// Start server
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`Tetris server running on port ${PORT}`);
 });

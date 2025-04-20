@@ -11,13 +11,13 @@ const LOCK_FLASH_MS       = 120;   // ms duration of lock flash
 const CLEAR_STYLE         = 'explode'; // in case we want to add support for another clear animnation
 /* ================================================================= */
 
-/* canonical NES/TGM colours */
+/* canonical NES/TGM colors */
 const BASE = {
   1: '#00FFFF', 2: '#0000FF', 3: '#FF7700',
   4: '#FFFF00', 5: '#00FF00', 6: '#FF0000', 7: '#AA00FF'
 };
 
-/* colour helpers */
+/* color helpers */
 const toRgb = h => [0,2,4].map(i => parseInt(h.slice(1+i,3+i), 16));
 const toHex = rgb => '#' + rgb.map(v =>
   Math.max(0, Math.min(255, Math.round(v)))

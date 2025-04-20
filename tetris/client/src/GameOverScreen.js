@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 
-const GameOverScreen = ({ gameOverData, onTimeout }) => {
+const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
   const [countdown, setCountdown] = useState(5);
-  
+
   useEffect(() => {
     // Start countdown
     const timer = setInterval(() => {
@@ -15,13 +15,12 @@ const GameOverScreen = ({ gameOverData, onTimeout }) => {
         return prev - 1;
       });
     }, 1000);
-    
+
     return () => clearInterval(timer);
   }, [onTimeout]);
-  
-  // Format the player ID to be more readable
-  const playerShortId = gameOverData.playerId ? gameOverData.playerId.substring(0, 4) : 'Unknown';
-  
+
+  const youLost = currentPlayerId === gameOverData.playerId;
+
   return (
     <div style={{
       position: 'fixed',
@@ -44,18 +43,38 @@ const GameOverScreen = ({ gameOverData, onTimeout }) => {
         color: 'white',
         maxWidth: '400px'
       }}>
-        <h2 style={{ margin: '0 0 20px', fontSize: '28px', color: '#FF5733' }}>Game Over</h2>
-        
-        <div style={{ fontSize: '18px', marginBottom: '15px' }}>
-          Player <span style={{ fontWeight: 'bold', color: '#FF5733' }}>{playerShortId}</span> lost!
+        <h2 style={{
+          margin: '0 0 20px',
+          fontSize: '28px',
+          color: '#FF5733'
+        }}>
+          Game Over
+        </h2>
+
+        {youLost && (
+          <div style={{
+            fontSize: '20px',
+            marginBottom: '15px'
+          }}>
+            You lost!
+          </div>
+        )}
+
+        <div style={{
+          fontSize: '24px',
+          margin: '20px 0'
+        }}>
+          Final Score: <span style={{ fontWeight: 'bold' }}>
+            {gameOverData.score}
+          </span>
         </div>
-        
-        <div style={{ fontSize: '24px', margin: '20px 0' }}>
-          Final Score: <span style={{ fontWeight: 'bold' }}>{gameOverData.score}</span>
-        </div>
-        
-        <div style={{ fontSize: '16px', marginTop: '25px', color: '#AAA' }}>
-          Returning to lobby in {countdown} seconds...
+
+        <div style={{
+          fontSize: '16px',
+          marginTop: '25px',
+          color: '#AAA'
+        }}>
+          Returning to lobby in {countdown}…
         </div>
       </div>
     </div>

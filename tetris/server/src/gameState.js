@@ -1,8 +1,5 @@
 // server/src/gameState.js
 
-// Define tetromino shapes and colors
-// Update the TETROMINOES definition with all rotations
-
 // Define tetromino shapes and colors with all rotations
 const TETROMINOES = {
   // I (cyan)
@@ -46,26 +43,26 @@ const TETROMINOES = {
     rotations: [
       // All orientations are the same
       [
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
+        [0, 4, 4, 0],
+        [0, 4, 4, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       [
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
+        [0, 4, 4, 0],
+        [0, 4, 4, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       [
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
+        [0, 4, 4, 0],
+        [0, 4, 4, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       [
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
+        [0, 4, 4, 0],
+        [0, 4, 4, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ]
@@ -78,30 +75,30 @@ const TETROMINOES = {
     rotations: [
       // 0°
       [
-        [2, 0, 0, 0],
-        [2, 2, 2, 0],
+        [3, 0, 0, 0],
+        [3, 3, 3, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 90°
       [
-        [0, 2, 2, 0],
-        [0, 2, 0, 0],
-        [0, 2, 0, 0],
+        [0, 3, 3, 0],
+        [0, 3, 0, 0],
+        [0, 3, 0, 0],
         [0, 0, 0, 0]
       ],
       // 180°
       [
         [0, 0, 0, 0],
-        [2, 2, 2, 0],
-        [0, 0, 2, 0],
+        [3, 3, 3, 0],
+        [0, 0, 3, 0],
         [0, 0, 0, 0]
       ],
       // 270°
       [
-        [0, 2, 0, 0],
-        [0, 2, 0, 0],
-        [2, 2, 0, 0],
+        [0, 3, 0, 0],
+        [0, 3, 0, 0],
+        [3, 3, 0, 0],
         [0, 0, 0, 0]
       ]
     ]
@@ -113,30 +110,30 @@ const TETROMINOES = {
     rotations: [
       // 0°
       [
-        [0, 0, 3, 0],
-        [3, 3, 3, 0],
+        [0, 0, 2, 0],
+        [2, 2, 2, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 90°
       [
-        [0, 3, 0, 0],
-        [0, 3, 0, 0],
-        [0, 3, 3, 0],
+        [0, 2, 0, 0],
+        [0, 2, 0, 0],
+        [0, 2, 2, 0],
         [0, 0, 0, 0]
       ],
       // 180°
       [
         [0, 0, 0, 0],
-        [3, 3, 3, 0],
-        [3, 0, 0, 0],
+        [2, 2, 2, 0],
+        [2, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 270°
       [
-        [3, 3, 0, 0],
-        [0, 3, 0, 0],
-        [0, 3, 0, 0],
+        [2, 2, 0, 0],
+        [0, 2, 0, 0],
+        [0, 2, 0, 0],
         [0, 0, 0, 0]
       ]
     ]
@@ -148,30 +145,30 @@ const TETROMINOES = {
     rotations: [
       // 0°
       [
-        [0, 4, 4, 0],
-        [4, 4, 0, 0],
+        [0, 5, 5, 0],
+        [5, 5, 0, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 90°
       [
-        [0, 4, 0, 0],
-        [0, 4, 4, 0],
-        [0, 0, 4, 0],
+        [0, 5, 0, 0],
+        [0, 5, 5, 0],
+        [0, 0, 5, 0],
         [0, 0, 0, 0]
       ],
       // 180°
       [
         [0, 0, 0, 0],
-        [0, 4, 4, 0],
-        [4, 4, 0, 0],
+        [0, 5, 5, 0],
+        [5, 5, 0, 0],
         [0, 0, 0, 0]
       ],
       // 270°
       [
-        [4, 0, 0, 0],
-        [4, 4, 0, 0],
-        [0, 4, 0, 0],
+        [5, 0, 0, 0],
+        [5, 5, 0, 0],
+        [0, 5, 0, 0],
         [0, 0, 0, 0]
       ]
     ]
@@ -183,30 +180,30 @@ const TETROMINOES = {
     rotations: [
       // 0°
       [
-        [5, 5, 0, 0],
-        [0, 5, 5, 0],
+        [6, 6, 0, 0],
+        [0, 6, 6, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 90°
       [
-        [0, 0, 5, 0],
-        [0, 5, 5, 0],
-        [0, 5, 0, 0],
+        [0, 0, 6, 0],
+        [0, 6, 6, 0],
+        [0, 6, 0, 0],
         [0, 0, 0, 0]
       ],
       // 180°
       [
         [0, 0, 0, 0],
-        [5, 5, 0, 0],
-        [0, 5, 5, 0],
+        [6, 6, 0, 0],
+        [0, 6, 6, 0],
         [0, 0, 0, 0]
       ],
       // 270°
       [
-        [0, 5, 0, 0],
-        [5, 5, 0, 0],
-        [5, 0, 0, 0],
+        [0, 6, 0, 0],
+        [6, 6, 0, 0],
+        [6, 0, 0, 0],
         [0, 0, 0, 0]
       ]
     ]
@@ -218,30 +215,30 @@ const TETROMINOES = {
     rotations: [
       // 0°
       [
-        [0, 6, 0, 0],
-        [6, 6, 6, 0],
+        [0, 7, 0, 0],
+        [7, 7, 7, 0],
         [0, 0, 0, 0],
         [0, 0, 0, 0]
       ],
       // 90°
       [
-        [0, 6, 0, 0],
-        [0, 6, 6, 0],
-        [0, 6, 0, 0],
+        [0, 7, 0, 0],
+        [0, 7, 7, 0],
+        [0, 7, 0, 0],
         [0, 0, 0, 0]
       ],
       // 180°
       [
         [0, 0, 0, 0],
-        [6, 6, 6, 0],
-        [0, 6, 0, 0],
+        [7, 7, 7, 0],
+        [0, 7, 0, 0],
         [0, 0, 0, 0]
       ],
       // 270°
       [
-        [0, 6, 0, 0],
-        [6, 6, 0, 0],
-        [0, 6, 0, 0],
+        [0, 7, 0, 0],
+        [7, 7, 0, 0],
+        [0, 7, 0, 0],
         [0, 0, 0, 0]
       ]
     ]
@@ -249,8 +246,6 @@ const TETROMINOES = {
 };
 
 // Get a random tetromino type
-// Update the getRandomTetromino function
-
 function getRandomTetromino() {
   const types = Object.keys(TETROMINOES);
   const randomType = types[Math.floor(Math.random() * types.length)];
@@ -327,7 +322,8 @@ function handleNewPlayer(gameState, playerId) {
       dasDirection: null, dasTimer: 0, dasRepeatTimer: 0,
       lockTimer: 0, isLocking: false,
       entryDelayTimer: 0, isWaitingForNextPiece: false,
-      lockResets: 0
+      lockResets: 0,
+      justPerformedHardDrop: false // Add this flag for hard drop control
     };
     
     gameState.activePlayers.add(playerId);
@@ -357,7 +353,8 @@ function handleNewPlayer(gameState, playerId) {
     dasDirection: null, dasTimer: 0, dasRepeatTimer: 0,
     lockTimer: 0, isLocking: false,
     entryDelayTimer: 0, isWaitingForNextPiece: false,
-    lockResets: 0
+    lockResets: 0,
+    justPerformedHardDrop: false // Add this flag for hard drop control
   };
   
   gameState.activePlayers.add(playerId);
@@ -483,8 +480,6 @@ function placeTetromino(board, tetromino, x, y, playerId) {
   return newBoard;
 }
 
-// Replace the existing rotateTetromino function:
-
 function rotateTetromino(tetromino) {
   const { type, rotationIndex } = tetromino;
   const tetrominoData = TETROMINOES[type];
@@ -504,8 +499,6 @@ function rotateTetromino(tetromino) {
     rotationIndex: nextRotationIndex
   };
 }
-
-
 
 function clearLines(gameState) {
   const board = gameState.board;
@@ -534,6 +527,12 @@ function handlePlayerAction(gameState, playerId, action) {
   let { currentPiece } = player;
   const board = gameState.board;
   let successfulMove = false;
+  
+  // Check if action is a hard drop and player just performed one
+  if (action.type === 'hardDrop' && player.justPerformedHardDrop) {
+    // Ignore this action - we don't allow rapid hard drops
+    return gameState;
+  }
   
   switch (action.type) {
     case 'moveLeft':
@@ -588,9 +587,13 @@ function handlePlayerAction(gameState, playerId, action) {
       gameState.board = updatedBoard;
       player.score += clearedLines * 100;
       
-      // Prepare for next piece
+      // Prepare for next piece and set hard drop flag
       player.isWaitingForNextPiece = true;
       player.entryDelayTimer = 0;
+      
+      // Set flag to prevent rapid hard drops
+      player.justPerformedHardDrop = true;
+      
       break;
       
     case 'softDrop':
