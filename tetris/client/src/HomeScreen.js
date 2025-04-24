@@ -48,12 +48,6 @@ const HomeScreen = ({
   const currentPlayer = currentPlayerShortId ? Object.values(players).find(p => p.id === currentPlayerShortId) : null;
   const isPlayerOne = currentPlayer && currentPlayer.playerNumber === 1;
   
-  const gameModes = [
-    { id: 'classic', name: 'Classic Mode', disabled: false },
-    { id: 'battle', name: 'Battle Mode', disabled: true },
-    { id: 'cooperative', name: 'Co-op Mode', disabled: true }
-  ];
-  
   // Animate background grid
   useEffect(() => {
     const interval = setInterval(() => {
@@ -61,6 +55,19 @@ const HomeScreen = ({
     }, 500);
     return () => clearInterval(interval);
   }, []);
+  
+  // Track X key press for ready
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key.toLowerCase() === 'x' && currentPlayer) {
+        const isReady = readyPlayers.some(id => players[id] && players[id].id === currentPlayer.id);
+        onReady(!isReady);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentPlayer, readyPlayers, players, onReady]);
   
   // Render tetromino shape for player icon
   const renderTetromino = (playerNum, color, ready) => {
@@ -174,6 +181,26 @@ const HomeScreen = ({
           </div>
         )}
         
+        {currentPlayer && !gameInProgress && (
+          <div style={{
+            marginBottom: '15px',
+            padding: '8px',
+            fontSize: '16px',
+            color: '#FFCC00'
+          }}>
+            Press <span style={{
+              display: 'inline-block',
+              background: '#333',
+              color: 'white',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              margin: '0 4px',
+              fontWeight: 'bold',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.5)'
+            }}>X</span> or click the READY button to get ready
+          </div>
+        )}
+        
         <div style={{ 
           display: 'flex', 
           justifyContent: 'center', 
@@ -200,7 +227,9 @@ const HomeScreen = ({
                   ? `0 0 15px ${isReady ? '#33ee66' : '#ffcc00'}`
                   : 'none',
                 transition: 'all 0.3s ease',
-                overflow: 'hidden'
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column'
               }}>
                 {/* Player number indicator */}
                 <div style={{
@@ -221,21 +250,24 @@ const HomeScreen = ({
                   {num}
                 </div>
                 
+                {/* Fixed height for player label - ensures consistent spacing */}
                 <div style={{
+                  height: '30px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   fontWeight: 'bold',
-                  marginBottom: '6px',
-                  fontSize: '18px',
-                  marginTop: '10px'
+                  fontSize: '18px'
                 }}>
                   {isCurrentPlayer && '⭐ You ⭐'}
                 </div>
 
-                {/* Tetromino icon */}
+                {/* Tetromino icon - fixed position */}
                 <div style={{
+                  flex: 1,
                   display: 'flex',
                   justifyContent: 'center',
-                  alignItems: 'center',
-                  height: '90px'
+                  alignItems: 'center'
                 }}>
                   {player ? (
                     renderTetromino(num, player.color, isReady)
@@ -246,38 +278,30 @@ const HomeScreen = ({
                   )}
                 </div>
 
-                {/* Ready button */}
-                {isCurrentPlayer && (
-                  <button 
-                    onClick={() => onReady(!isReady)} 
-                    style={{
-                      width: '100%',
-                      padding: '10px',
-                      border: 'none',
-                      borderRadius: '5px',
-                      background: isReady 
-                        ? 'linear-gradient(to bottom, #55aa55, #338833)'
-                        : 'linear-gradient(to bottom, #aa5555, #883333)',
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontWeight: 'bold',
-                      boxShadow: '0 3px 6px rgba(0,0,0,0.3)',
-                      transform: 'translateY(0)',
-                      transition: 'all 0.2s ease',
-                      marginTop: '10px',
-                      ':hover': {
-                        transform: 'translateY(-2px)',
-                        boxShadow: '0 5px 10px rgba(0,0,0,0.4)'
-                      },
-                      ':active': {
-                        transform: 'translateY(1px)',
-                        boxShadow: '0 2px 3px rgba(0,0,0,0.3)'
-                      }
-                    }}
-                  >
-                    {isReady ? 'Cancel' : 'READY!'}
-                  </button>
-                )}
+                {/* Fixed height area for button or empty space */}
+                <div style={{height: '45px', marginTop: '5px'}}>
+                  {isCurrentPlayer && (
+                    <button 
+                      onClick={() => onReady(!isReady)} 
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        border: 'none',
+                        borderRadius: '5px',
+                        background: isReady 
+                          ? 'linear-gradient(to bottom, #55aa55, #338833)'
+                          : 'linear-gradient(to bottom, #aa5555, #883333)',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        boxShadow: '0 3px 6px rgba(0,0,0,0.3)',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {isReady ? 'Cancel' : 'READY!'}
+                    </button>
+                  )}
+                </div>
 
                 {/* Player ID */}
                 {player && (
@@ -295,44 +319,6 @@ const HomeScreen = ({
             );
           })}
         </div>
-        
-        {isPlayerOne && (
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{
-              marginBottom: '15px',
-              color: '#66CCFF', 
-              textShadow: '0 0 5px #33AADD'
-            }}>
-              Game Mode
-            </h3>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
-              {gameModes.map(mode => (
-                <button
-                  key={mode.id}
-                  onClick={() => !mode.disabled && onSetGameMode(mode.id)}
-                  style={{
-                    padding: '12px 20px',
-                    background: gameMode === mode.id 
-                      ? 'linear-gradient(to bottom, #ff7755, #dd5533)'
-                      : 'linear-gradient(to bottom, #555, #333)',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: 'white',
-                    opacity: mode.disabled ? 0.5 : 1,
-                    cursor: mode.disabled ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold',
-                    boxShadow: gameMode === mode.id ? '0 0 10px rgba(255,119,85,0.5)' : 'none',
-                    transition: 'all 0.2s ease'
-                  }}
-                  disabled={mode.disabled}
-                >
-                  {mode.name}
-                  {mode.disabled && ' (Coming Soon)'}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         
         {isPlayerOne && (
           <button
@@ -394,6 +380,7 @@ const HomeScreen = ({
             <span>↑ or Z : Rotate</span>
             <span>↓ : Soft drop</span>
             <span>Space : Hard drop</span>
+            <span>X : Ready up</span>
           </p>
         </div>
       </div>
