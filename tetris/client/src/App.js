@@ -73,7 +73,7 @@ function App() {
 
         // Load configuration
         const config = await loadConfig();
-        const serverAddress = config.client?.serverAddress || 'http://localhost:3001';
+        const serverAddress = config.client?.serverAddress;
 
         debugLog('events', 'Connecting to server:', serverAddress);
 
