@@ -329,7 +329,10 @@ io.on('connection', (socket) => {
   
   // If game in progress, show "game in progress" screen but don't add them to game
   if (gameState.appPhase === 'playing') {
+    console.log(`Player ${socket.id} connected during active game - showing waiting screen only`);
+    
     // Send limited game state that shows "Game in Progress" message
+    // This is intentionally minimal to ensure they only see homescreen
     const limitedState = {
       appPhase: 'homescreen',
       gameInProgress: true,
@@ -337,8 +340,19 @@ io.on('connection', (socket) => {
       readyPlayers: [],
       gameMode: gameState.gameMode
     };
+    
+    // First initialize them with limited state
     socket.emit('init', limitedState);
-    return;  // Don't add them to the active game
+    
+    // Then add them as a player for when the game ends
+    gameState = handleNewPlayer(gameState, socket.id);
+    
+    // But immediately send them the limited state again to override
+    // any automatic updates they might receive
+    socket.emit('gameState', limitedState);
+    
+    // Return without adding them to the active game flow
+    return;
   }
 
   // Only add new players if no game is in progress
@@ -465,18 +479,28 @@ io.on('connection', (socket) => {
       // Set up game loop
       clearInterval(gameLoop);
       gameLoop = setInterval(() => {
+        // Only update game state for active players
         updateGameState();
         
-        // Create a fresh filtered state for each update
+        // Create a completely fresh state object for active players with deep cloning
+        // to prevent any shared references between objects
         const updatedGameStateForActive = {
-          ...gameState,
-          players: {}
+          appPhase: gameState.appPhase,
+          gameInProgress: gameState.gameInProgress,
+          board: JSON.parse(JSON.stringify(gameState.board)),
+          players: {},
+          readyPlayers: [...gameState.readyPlayers],
+          activePlayers: new Set(gameState.activePlayers),
+          gameMode: gameState.gameMode,
+          lineClearActive: gameState.lineClearActive,
+          lineClearTimer: gameState.lineClearTimer,
+          linesToClear: gameState.linesToClear ? [...gameState.linesToClear] : []
         };
         
-        // Only include active players
+        // Only include active players in the filtered state
         readyPlayers.forEach(id => {
           if (gameState.players[id]) {
-            updatedGameStateForActive.players[id] = {...gameState.players[id]};
+            updatedGameStateForActive.players[id] = JSON.parse(JSON.stringify(gameState.players[id]));
           }
         });
         
@@ -487,17 +511,31 @@ io.on('connection', (socket) => {
             socket.emit('gameState', updatedGameStateForActive);
           }
         });
+        
+        // For non-ready players, continuously send the limited state
+        // to ensure they stay on the homescreen with "Game in Progress" message
+        nonReadyPlayers.forEach(id => {
+          const socket = io.sockets.sockets.get(id);
+          if (socket) {
+            socket.emit('gameState', limitedState);
+          }
+        });
       }, FRAME_DELAY);
     }
   });
 
   // Handle player actions
   socket.on('playerAction', (action) => {
-    if (gameState.appPhase === 'playing') {
-      const player = gameState.players[socket.id];
-      if (!player) return;
-      
+    // Only process actions from players who are:
+    // 1. Playing in an active game
+    // 2. Part of the active players set
+    // 3. Were in the ready players list when the game started
+    if (gameState.appPhase === 'playing' && 
+        gameState.activePlayers.has(socket.id) &&
+        gameState.readyPlayers.includes(socket.id)) {
       gameState = handlePlayerAction(gameState, socket.id, action);
+    } else {
+      console.log(`Ignored action from non-active player: ${socket.id}`);
     }
   });
 
