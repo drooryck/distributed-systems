@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
 import BoardStage from './BoardStage';
-import HomeScreen from './HomeScreen';
+import NewHomeScreen from './NewHomeScreen';
+import ReadyScreen from './ReadyScreen';
 import GameOverScreen from './GameOverScreen';
 import ScorePanel from './ScorePanel';
+import './App.css';
 
 // Background image configuration
 const BACKGROUND_IMAGES = [
@@ -27,6 +29,19 @@ const loadConfig = async () => {
   }
 };
 
+// Add debug logger at the top of the file
+const DEBUG = {
+  events: true,
+  state: true,
+  render: true
+};
+
+function debugLog(type, message, data) {
+  if (DEBUG[type]) {
+    console.log(`[DEBUG:${type}] ${message}`, data !== undefined ? data : '');
+  }
+}
+
 function App() {
   const [socket, setSocket] = useState(null);
   const [gameState, setGameState] = useState(null);
@@ -34,6 +49,7 @@ function App() {
   const [gameOverData, setGameOverData] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [error, setError] = useState(null);
+  const [socketError, setSocketError] = useState(null);
 
   // Hard‐drop guard so holding space won't repeat
   const hardDropActiveRef = useRef(false);
@@ -59,7 +75,7 @@ function App() {
         const config = await loadConfig();
         const serverAddress = config.client?.serverAddress || 'http://localhost:3001';
 
-        console.log(`Connecting to server at: ${serverAddress}`);
+        debugLog('events', 'Connecting to server:', serverAddress);
 
         // Create new socket connection
         const newSocket = io(serverAddress);
@@ -67,45 +83,111 @@ function App() {
 
         // Socket event handlers
         newSocket.on('connect', () => {
-          console.log('Connected to server');
+          debugLog('events', 'Socket connected with ID:', newSocket.id);
           setIsConnecting(false);
+          setSocketError(null);
         });
 
         newSocket.on('connect_error', (err) => {
-          console.error('Connection error:', err);
-          setError(`Connection error: ${err.message}`);
+          debugLog('events', 'Connection error:', err.message);
+          setSocketError(`Connection error: ${err.message}`);
           setIsConnecting(false);
         });
 
+        // Handle initial state
         newSocket.on('init', (initialState) => {
-          console.log('Received initial game state:', initialState);
+          debugLog('events', 'Received init event with state:', initialState);
           setGameState(initialState);
-          updatePlayerList(initialState.players || {});
+        });
+        
+        // Handle room creation
+        newSocket.on('roomCreated', (data) => {
+          debugLog('events', 'Received roomCreated event with data:', data);
+          debugLog('state', 'Setting appPhase to readyscreen from:', gameState?.appPhase);
+          setGameState(prevState => {
+            const newState = {
+              ...data.gameState,
+              appPhase: 'readyscreen'
+            };
+            debugLog('state', 'New gameState after roomCreated:', newState);
+            return newState;
+          });
+          setError(null);
+        });
+        
+        // Handle room join
+        newSocket.on('roomJoined', (data) => {
+          debugLog('events', 'Received roomJoined event with data:', data);
+          debugLog('state', 'Setting appPhase to readyscreen from:', gameState?.appPhase);
+          setGameState(prevState => {
+            const newState = {
+              ...data.gameState,
+              appPhase: 'readyscreen'
+            };
+            debugLog('state', 'New gameState after roomJoined:', newState);
+            return newState;
+          });
+          setError(null);
+        });
+        
+        // Handle leaving room
+        newSocket.on('roomLeft', (data) => {
+          debugLog('events', 'Received roomLeft event with data:', data);
+          debugLog('state', 'Setting appPhase to homescreen from:', gameState?.appPhase);
+          setGameState(prevState => {
+            const newState = {
+              appPhase: 'homescreen',
+              socketId: newSocket.id
+            };
+            debugLog('state', 'New gameState after roomLeft:', newState);
+            return newState;
+          });
+        });
+        
+        // Handle errors
+        newSocket.on('error', ({ message }) => {
+          debugLog('events', 'Received server error:', message);
+          setError(message);
         });
 
+        // Handle game state updates
         newSocket.on('gameState', (newState) => {
+          debugLog('events', 'Received gameState update with appPhase:', newState?.appPhase);
           setGameState(prevState => {
-            // If we're showing gameInProgress screen, only update if returning to lobby
-            if (prevState?.gameInProgress && !prevState.players[newSocket.id] &&
-                newState.appPhase === 'playing') {
-              // Don't update state - keep showing "Game in Progress" screen
+            // If we're showing a readyscreen from a room we just created or joined,
+            // don't let a gameState event with homescreen override it
+            if (prevState?.appPhase === 'readyscreen' && newState?.appPhase === 'homescreen') {
+              debugLog('state', 'Ignoring homescreen gameState while in readyscreen');
               return prevState;
             }
-
-            // Update player list if we have new state
-            if (newState) {
-              updatePlayerList(newState.players || {});
-            }
-
-            // Otherwise update normally
+            debugLog('state', 'Updating gameState from:', prevState?.appPhase, 'to:', newState?.appPhase);
             return newState;
           });
         });
 
+        // Handle game over
         newSocket.on('gameOver', (data) => {
           console.log('Game over with data:', data);
           setIsGameOver(true);
           setGameOverData(data);
+        });
+        
+        // Handle player joined notification
+        newSocket.on('playerJoined', ({ playerId, player, gameState }) => {
+          console.log(`Player joined: ${playerId}`);
+          setGameState(gameState);
+        });
+        
+        // Handle player left notification
+        newSocket.on('playerLeft', ({ playerId, gameState }) => {
+          console.log(`Player left: ${playerId}`);
+          setGameState(gameState);
+        });
+        
+        // Handle host assignment (when previous host leaves)
+        newSocket.on('hostAssigned', ({ gameState }) => {
+          console.log('You are now the host');
+          setGameState(gameState);
         });
 
         // Return cleanup function
@@ -115,7 +197,7 @@ function App() {
         };
       } catch (err) {
         console.error('Error connecting to server:', err);
-        setError(`Error connecting to server: ${err.message}`);
+        setSocketError(`Error connecting to server: ${err.message}`);
         setIsConnecting(false);
       }
     };
@@ -252,10 +334,11 @@ function App() {
           default:
             break;
         }
-      } else if (gameState.appPhase === 'homescreen') {
+      } else if (gameState.appPhase === 'readyscreen') {
         // Handle ready toggle on X key press
         if (e.code === 'KeyX') {
-          const isCurrentlyReady = gameState.readyPlayers.includes(socket.id);
+          const isCurrentlyReady = gameState.readyPlayers && 
+            gameState.readyPlayers.includes(socket.id);
           console.log('X key pressed, toggling ready state:', !isCurrentlyReady);
           socket.emit('playerReady', !isCurrentlyReady);
         }
@@ -291,6 +374,25 @@ function App() {
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [socket, gameState]);
+
+  // Room management handlers
+  const handleCreateRoom = useCallback((playerName) => {
+    if (socket) {
+      socket.emit('createRoom', playerName);
+    }
+  }, [socket]);
+  
+  const handleJoinRoom = useCallback((roomCode, playerName) => {
+    if (socket) {
+      socket.emit('joinRoom', { roomCode, playerName });
+    }
+  }, [socket]);
+  
+  const handleLeaveRoom = useCallback(() => {
+    if (socket) {
+      socket.emit('leaveRoom');
+    }
+  }, [socket]);
 
   // Handle player ready state
   const handlePlayerReady = useCallback((isReady) => {
@@ -330,11 +432,11 @@ function App() {
     return <div className="App"><h1>Connecting to server...</h1></div>;
   }
 
-  if (error) {
+  if (socketError) {
     return (
       <div className="App">
         <h1>Connection Error</h1>
-        <p>{error}</p>
+        <p>{socketError}</p>
         <p>Please check that the server is running and the configuration is correct.</p>
         <button
           onClick={() => window.location.reload()}
@@ -359,12 +461,11 @@ function App() {
     return <div className="App"><h1>Waiting for game state...</h1></div>;
   }
 
-  // Home screen or game screen based on app phase
+  // Render appropriate screen based on app phase
   return (
     <div
       className="App"
       style={{
-        // Apply background image only during gameplay
         ...(gameState.appPhase === 'playing' && {
           backgroundImage: `url(${getCurrentBackgroundUrl()})`,
           backgroundSize: 'cover',
@@ -376,16 +477,26 @@ function App() {
       tabIndex="0"
     >
       {gameState.appPhase === 'homescreen' && (
-        <HomeScreen
+        <NewHomeScreen
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          error={error}
+        />
+      )}
+      
+      {gameState.appPhase === 'readyscreen' && (
+        <ReadyScreen
+          roomCode={gameState.roomCode}
           players={gameState.players || {}}
           currentPlayerId={socket?.id}
           readyPlayers={gameState.readyPlayers || []}
           onReady={handlePlayerReady}
           onStartGame={handleStartGame}
+          onLeaveRoom={handleLeaveRoom}
           onSetGameMode={handleSetGameMode}
           gameMode={gameState.gameMode}
           gameInProgress={gameState.gameInProgress}
-          isRejoining={gameState.players?.[socket?.id]?.isRejoining}
+          isHost={gameState.players?.[socket?.id]?.isHost}
         />
       )}
 
@@ -406,12 +517,30 @@ function App() {
           }}>
             <h1 style={{ margin: 0, fontSize: '28px', color: '#fff' }}>Tetristributed</h1>
             <div style={{
-              fontSize: '14px',
-              backgroundColor: '#333',
-              padding: '5px 10px',
-              borderRadius: '4px'
+              display: 'flex',
+              alignItems: 'center',
+              gap: '15px'
             }}>
-              Player: {socket?.id && socket.id.substring(0, 4)}
+              <div style={{
+                fontSize: '14px',
+                backgroundColor: '#444',
+                padding: '5px 10px',
+                borderRadius: '4px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center'
+              }}>
+                <span style={{fontSize: '10px', color: '#aaa'}}>ROOM</span>
+                <span style={{fontWeight: 'bold'}}>{gameState.roomCode}</span>
+              </div>
+              <div style={{
+                fontSize: '14px',
+                backgroundColor: '#333',
+                padding: '5px 10px',
+                borderRadius: '4px'
+              }}>
+                Player: {socket?.id && socket.id.substring(0, 4)}
+              </div>
             </div>
           </div>
 
@@ -472,7 +601,7 @@ function App() {
                               fontWeight: isCurrentPlayer ? 'bold' : 'normal',
                               color: isCurrentPlayer ? '#fff' : '#ccc'
                             }}>
-                              Player {player.playerNumber || shortId}
+                              {player.name || `Player ${player.playerNumber || shortId}`}
                             </span>
                             {isCurrentPlayer && <span style={{
                               fontSize: '12px',
