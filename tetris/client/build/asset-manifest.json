@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "/static/css/main.96669b76.css",
-    "main.js": "/static/js/main.da5972d5.js",
+    "main.js": "/static/js/main.c061832e.js",
     "static/media/tetris-1920-x-1080-background-hyihqau5t3lalo4e.png": "/static/media/tetris-1920-x-1080-background-hyihqau5t3lalo4e.243b136882742f63b61c.png",
     "index.html": "/index.html",
     "main.96669b76.css.map": "/static/css/main.96669b76.css.map",
-    "main.da5972d5.js.map": "/static/js/main.da5972d5.js.map"
+    "main.c061832e.js.map": "/static/js/main.c061832e.js.map"
   },
   "entrypoints": [
     "static/css/main.96669b76.css",
-    "static/js/main.da5972d5.js"
+    "static/js/main.c061832e.js"
   ]
 }

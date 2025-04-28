@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { connectToCluster } from './serverDiscovery';
 import BoardStage from './BoardStage';
 import NewHomeScreen from './NewHomeScreen';
 import ReadyScreen from './ReadyScreen';
@@ -25,23 +26,29 @@ const loadConfig = async () => {
     return await response.json();
   } catch (error) {
     console.warn('Error loading config, using default server address:', error);
-    return { client: { serverAddress: 'http://localhost:3001' } };
+    return { serverAddress: 'http://localhost:3001' };
   }
 };
 
-// Add debug logger at the top of the file
+// Debug logging
 const DEBUG = {
   events: true,
   state: true,
-  render: true
+  render: false
 };
 
-function debugLog(type, message, data) {
+function debugLog(type, ...args) {
   if (DEBUG[type]) {
-    console.log(`[DEBUG:${type}] ${message}`, data !== undefined ? data : '');
+    console.log(`[DEBUG:${type}]`, ...args);
   }
 }
 
+// Function to get current background URL
+const getBackgroundUrl = (index) => {
+  return `${process.env.PUBLIC_URL}/backgrounds/${BACKGROUND_IMAGES[index]}`;
+};
+
+// App component
 function App() {
   const [socket, setSocket] = useState(null);
   const [gameState, setGameState] = useState(null);
@@ -65,20 +72,42 @@ function App() {
   const [level, setLevel] = useState(1);
   const timerIntervalRef = useRef(null);
 
+  // For reconnection logic
+  const reconnectTimeoutRef = useRef(null);
+  const reconnectionAttemptsRef = useRef(0);
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const lastGameStateRef = useRef(null);
+
+  // Function to get current background URL
+  const getCurrentBackgroundUrl = () => {
+    return getBackgroundUrl(currentBackgroundIndex);
+  };
+
   // Connect to socket on component mount
   useEffect(() => {
     const connectToServer = async () => {
       try {
         setIsConnecting(true);
+        setSocketError(null);
 
-        // Load configuration
-        const config = await loadConfig();
-        const serverAddress = config.client?.serverAddress;
+        const currentUrl = window.location.origin;
 
-        debugLog('events', 'Connecting to server:', serverAddress);
-
-        // Create new socket connection
-        const newSocket = io(serverAddress);
+        // Try to connect to the cluster
+        let newSocket;
+        try {
+          debugLog('events', 'Attempting to connect to server cluster');
+          newSocket = await connectToCluster(currentUrl);
+        } catch (clusterError) {
+          debugLog('events', 'Cluster connection failed, falling back to direct connection', clusterError);
+          
+          // Fall back to direct connection
+          const config = await loadConfig();
+          const serverAddress = config.client?.serverAddress || config.serverAddress || 'http://localhost:3001';
+          
+          debugLog('events', 'Connecting to server:', serverAddress);
+          newSocket = io(serverAddress);
+        }
+        
         setSocket(newSocket);
 
         // Socket event handlers
@@ -86,6 +115,7 @@ function App() {
           debugLog('events', 'Socket connected with ID:', newSocket.id);
           setIsConnecting(false);
           setSocketError(null);
+          reconnectionAttemptsRef.current = 0;
         });
 
         newSocket.on('connect_error', (err) => {
@@ -94,105 +124,200 @@ function App() {
           setIsConnecting(false);
         });
 
+        // Handle leader information updates
+        newSocket.on('leaderInfo', (info) => {
+          debugLog('events', 'Leader info received:', info);
+          
+          if (!info.isLeader && info.leaderAddress) {
+            debugLog('events', 'Redirecting to leader at:', info.leaderAddress);
+            
+            // Disconnect from current socket
+            newSocket.disconnect();
+            
+            // Connect to the leader
+            const leaderSocket = io(info.leaderAddress);
+            
+            // Set up all event handlers on the new socket
+            leaderSocket.on('connect', () => {
+              debugLog('events', 'Connected to leader with ID:', leaderSocket.id);
+              setIsConnecting(false);
+              setSocketError(null);
+              reconnectionAttemptsRef.current = 0;
+            });
+        
+            leaderSocket.on('gameState', (newGameState) => {
+              debugLog('state', 'Received gameState from leader:', newGameState);
+              setGameState(newGameState);
+              
+              // Update score if available
+              if (newGameState && newGameState.appPhase === 'playing') {
+                const player = newGameState.players[leaderSocket.id];
+                if (player) {
+                  const newScore = player.score || 0;
+                  if (newScore !== currentScore) {
+                    setLastScoreChange(Date.now());
+                    setCurrentScore(newScore);
+                  }
+                }
+              }
+            });
+        
+            leaderSocket.on('disconnect', (reason) => {
+              debugLog('events', 'Disconnected from leader:', reason);
+              // Add reconnection logic here if needed
+            });
+        
+            // Add other necessary event handlers
+            leaderSocket.on('init', (initialState) => {
+              debugLog('events', 'Received init from leader:', initialState);
+
+              // re-initialize your homescreen state
+              setGameState({
+                appPhase: initialState.appPhase,
+                players: {},
+                roomCode: null,
+                activePlayers: [],
+                readyPlayers: []
+              });
+              
+            });
+            
+            leaderSocket.on('error', (err) => {
+              debugLog('events', 'Leader socket error:', err);
+              setError(err.message);
+            });
+        
+            // Set the socket state to the new leader socket
+            setSocket(leaderSocket);
+          }
+        });
+
         // Handle initial state
         newSocket.on('init', (initialState) => {
           debugLog('events', 'Received init event with state:', initialState);
-          setGameState(initialState);
-        });
-        
-        // Handle room creation
-        newSocket.on('roomCreated', (data) => {
-          debugLog('events', 'Received roomCreated event with data:', data);
-          debugLog('state', 'Setting appPhase to readyscreen from:', gameState?.appPhase);
-          setGameState(prevState => {
-            const newState = {
-              ...data.gameState,
-              appPhase: 'readyscreen'
-            };
-            debugLog('state', 'New gameState after roomCreated:', newState);
-            return newState;
+          // Apply initial state as gameState so UI can render homescreen
+          setGameState({
+            appPhase: initialState.appPhase,
+            players: {},
+            roomCode: null,
+            activePlayers: [],
+            readyPlayers: []
           });
-          setError(null);
-        });
-        
-        // Handle room join
-        newSocket.on('roomJoined', (data) => {
-          debugLog('events', 'Received roomJoined event with data:', data);
-          debugLog('state', 'Setting appPhase to readyscreen from:', gameState?.appPhase);
-          setGameState(prevState => {
-            const newState = {
-              ...data.gameState,
-              appPhase: 'readyscreen'
-            };
-            debugLog('state', 'New gameState after roomJoined:', newState);
-            return newState;
-          });
-          setError(null);
-        });
-        
-        // Handle leaving room
-        newSocket.on('roomLeft', (data) => {
-          debugLog('events', 'Received roomLeft event with data:', data);
-          debugLog('state', 'Setting appPhase to homescreen from:', gameState?.appPhase);
-          setGameState(prevState => {
-            const newState = {
-              appPhase: 'homescreen',
-              socketId: newSocket.id
-            };
-            debugLog('state', 'New gameState after roomLeft:', newState);
-            return newState;
-          });
-        });
-        
-        // Handle errors
-        newSocket.on('error', ({ message }) => {
-          debugLog('events', 'Received server error:', message);
-          setError(message);
         });
 
         // Handle game state updates
-        newSocket.on('gameState', (newState) => {
-          debugLog('events', 'Received gameState update with appPhase:', newState?.appPhase);
-          setGameState(prevState => {
-            // If we're showing a readyscreen from a room we just created or joined,
-            // don't let a gameState event with homescreen override it
-            if (prevState?.appPhase === 'readyscreen' && newState?.appPhase === 'homescreen') {
+        newSocket.on('gameState', (newGameState) => {
+          debugLog('state', 'Received gameState update:', newGameState);
+          
+          setGameState((prevState) => {
+            // Store the game state for potential reconnection
+            if (newGameState) {
+              lastGameStateRef.current = newGameState;
+            }
+            
+            // Special case to prevent accidentally going back to homescreen
+            if (prevState?.appPhase === 'readyscreen' && newGameState?.appPhase === 'homescreen') {
               debugLog('state', 'Ignoring homescreen gameState while in readyscreen');
               return prevState;
             }
-            debugLog('state', 'Updating gameState from:', prevState?.appPhase, 'to:', newState?.appPhase);
-            return newState;
+            
+            return newGameState;
           });
+          
+          // Update score if available
+          if (newGameState && newGameState.appPhase === 'playing') {
+            // Find the player that corresponds to this client
+            const player = newGameState.players[newSocket.id];
+            if (player) {
+              const newScore = player.score || 0;
+              if (newScore !== currentScore) {
+                setLastScoreChange(Date.now());
+                setCurrentScore(newScore);
+              }
+            }
+          }
         });
 
-        // Handle game over
-        newSocket.on('gameOver', (data) => {
-          console.log('Game over with data:', data);
-          setIsGameOver(true);
-          setGameOverData(data);
-        });
-        
-        // Handle player joined notification
-        newSocket.on('playerJoined', ({ playerId, player, gameState }) => {
-          console.log(`Player joined: ${playerId}`);
+        // Handle room creation
+        newSocket.on('roomCreated', ({ roomCode, gameState }) => {
+          debugLog('events', `Room created: ${roomCode}`);
           setGameState(gameState);
         });
-        
-        // Handle player left notification
+
+        // Handle joining a room
+        newSocket.on('roomJoined', ({ roomCode, gameState }) => {
+          debugLog('events', `Joined room: ${roomCode}`);
+          setGameState(gameState);
+        });
+
+        // Handle player joining
+        newSocket.on('playerJoined', ({ playerId, gameState }) => {
+          debugLog('events', `Player joined: ${playerId}`);
+          setGameState(gameState);
+        });
+
+        // Handle player leaving
         newSocket.on('playerLeft', ({ playerId, gameState }) => {
-          console.log(`Player left: ${playerId}`);
+          debugLog('events', `Player left: ${playerId}`);
           setGameState(gameState);
         });
         
         // Handle host assignment (when previous host leaves)
         newSocket.on('hostAssigned', ({ gameState }) => {
-          console.log('You are now the host');
+          debugLog('events', 'You are now the host');
           setGameState(gameState);
+        });
+
+        // Handle game over
+        newSocket.on('gameOver', (data) => {
+          debugLog('events', 'Game over:', data);
+          setIsGameOver(true);
+          setGameOverData(data);
+        });
+
+        // Handle server errors
+        newSocket.on('error', (err) => {
+          debugLog('events', 'Server error:', err);
+          setError(err.message);
+        });
+
+        // Handle disconnection with reconnection logic
+        newSocket.on('disconnect', (reason) => {
+          debugLog('events', 'Socket disconnected:', reason);
+          
+          // If the disconnect was not initiated by the client, attempt to reconnect
+          if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
+            if (reconnectionAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+              debugLog('events', `Attempting to reconnect (${reconnectionAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS})...`);
+              setIsConnecting(true);
+              
+              // Clear any existing reconnection timeout
+              if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+              }
+              
+              // Exponential backoff for reconnection
+              const delay = Math.min(1000 * Math.pow(2, reconnectionAttemptsRef.current), 10000);
+              reconnectTimeoutRef.current = setTimeout(async () => {
+                reconnectionAttemptsRef.current++;
+                connectToServer();
+              }, delay);
+            } else {
+              debugLog('events', 'Max reconnection attempts reached');
+              setSocketError('Could not reconnect to the server. Please refresh the page.');
+              setIsConnecting(false);
+            }
+          }
         });
 
         // Return cleanup function
         return () => {
-          console.log('Disconnecting socket');
+          debugLog('events', 'Cleaning up socket connection');
+          
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+          }
+          
           newSocket.disconnect();
         };
       } catch (err) {
@@ -215,226 +340,191 @@ function App() {
 
     // Start background rotation when game is playing
     if (gameState && gameState.appPhase === 'playing') {
-      // Randomize starting background
-      setCurrentBackgroundIndex(Math.floor(Math.random() * BACKGROUND_IMAGES.length));
-
-      // Set interval to rotate backgrounds
       backgroundIntervalRef.current = setInterval(() => {
-        setCurrentBackgroundIndex(prevIndex =>
+        setCurrentBackgroundIndex((prevIndex) => 
           (prevIndex + 1) % BACKGROUND_IMAGES.length
         );
       }, BACKGROUND_CHANGE_INTERVAL);
     }
 
-    // Cleanup on unmount or phase change
     return () => {
       if (backgroundIntervalRef.current) {
         clearInterval(backgroundIntervalRef.current);
-        backgroundIntervalRef.current = null;
       }
     };
   }, [gameState?.appPhase]);
 
-  // Timer management based on game phase
+  // Timer effect for gameplay
   useEffect(() => {
-    // Clean up the previous interval if it exists
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-
     if (gameState && gameState.appPhase === 'playing') {
-      // Reset the timer when game starts
-      setElapsedTime(0);
-      setCurrentScore(0);
-      setLastScoreChange(0);
-      setLevel(1);
-
-      // Start a new timer that updates every 10ms for centisecond precision
-      timerIntervalRef.current = setInterval(() => {
-        setElapsedTime(prevTime => prevTime + 10);
-      }, 10);
-
-      console.log('Timer started');
-    }
-
-    // Cleanup on unmount or phase change
-    return () => {
+      if (!timerIntervalRef.current) {
+        const startTime = Date.now();
+        timerIntervalRef.current = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          setElapsedTime(elapsed);
+          
+          // Update level based on time (every 30 seconds)
+          const newLevel = Math.max(1, Math.floor(elapsed / 30) + 1);
+          if (newLevel !== level) {
+            setLevel(newLevel);
+          }
+        }, 1000);
+      }
+    } else {
+      // Clear timer when not playing
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
         timerIntervalRef.current = null;
       }
-    };
-  }, [gameState?.appPhase]);
-
-  // Update the player list for display and track current player's score
-  const updatePlayerList = useCallback((players) => {
-    if (!players || typeof players !== 'object') return;
-
-    // Map player data to what we need
-    const playerEntries = Object.entries(players);
-
-    // Update current player score state for the score panel
-    if (socket) {
-      const currentPlayerEntry = playerEntries.find(([id]) => id === socket.id);
-      if (currentPlayerEntry) {
-        const [, currentPlayer] = currentPlayerEntry;
-
-        // Update score if changed
-        if (currentPlayer.score !== currentScore) {
-          const scoreChange = Math.max(0, currentPlayer.score - currentScore);
-          if (scoreChange > 0) {
-            setLastScoreChange(scoreChange);
-            // Reset the score change highlight after 1 second
-            setTimeout(() => setLastScoreChange(0), 1000);
-          }
-          setCurrentScore(currentPlayer.score);
-        }
-
-        // Update level if changed
-        if (currentPlayer.level && currentPlayer.level !== level) {
-          setLevel(currentPlayer.level);
-        }
+      
+      // Reset timer and level when game ends
+      if (gameState && gameState.appPhase !== 'playing') {
+        setElapsedTime(0);
+        setLevel(1);
       }
     }
-  }, [currentScore, level, socket]);
+    
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [gameState?.appPhase, level]);
 
-  // Keyboard control handlers
+  // Handle keydown events for gameplay
+  const handleKeyDown = useCallback((e) => {
+    if (!socket || !gameState || gameState.appPhase !== 'playing') return;
+
+    // Prevent default behavior for game controls
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'KeyZ'].includes(e.code)) {
+      e.preventDefault();
+    }
+
+    // Only handle keys that aren't being repeated (except down)
+    if (!e.repeat || e.code === 'ArrowDown') {
+      switch (e.code) {
+        case 'ArrowLeft':
+          // First send immediate move, then start DAS
+          socket.emit('playerAction', { type: 'moveLeft' });
+          socket.emit('playerAction', { type: 'startDAS', direction: 'left' });
+          break;
+        case 'ArrowRight':
+          // First send immediate move, then start DAS
+          socket.emit('playerAction', { type: 'moveRight' });
+          socket.emit('playerAction', { type: 'startDAS', direction: 'right' });
+          break;
+        case 'ArrowUp':
+        case 'KeyZ':
+          socket.emit('playerAction', { type: 'rotate' });
+          break;
+        case 'ArrowDown':
+          socket.emit('playerAction', { type: 'softDrop' });
+          break;
+        case 'Space':
+          // guard against auto‑repeat when holding space
+          if (!hardDropActiveRef.current) {
+            socket.emit('playerAction', { type: 'hardDrop' });
+            hardDropActiveRef.current = true;
+          }
+          break;
+        default:
+          break;
+      }
+    }
+  }, [socket, gameState]);
+
+  // Handle keyup events to stop DAS (delayed auto-shift)
+  const handleKeyUp = useCallback((e) => {
+    if (!socket || !gameState || gameState.appPhase !== 'playing') return;
+    
+    switch (e.code) {
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        socket.emit('playerAction', { type: 'stopDAS' });
+        break;
+      case 'Space':
+        hardDropActiveRef.current = false;
+        break;
+      default:
+        break;
+    }
+  }, [socket, gameState]);
+
+  // Add key event listeners
   useEffect(() => {
-    if (!socket || !gameState) return;
-
-    const handleKeyDown = (e) => {
-      // Only process key events if game is in progress
-      if (gameState.appPhase === 'playing') {
-        switch (e.code) {
-          case 'ArrowLeft':
-            // First send immediate move, then start DAS
-            socket.emit('playerAction', { type: 'moveLeft' });
-            socket.emit('playerAction', { type: 'startDAS', direction: 'left' });
-            break;
-          case 'ArrowRight':
-            // First send immediate move, then start DAS
-            socket.emit('playerAction', { type: 'moveRight' });
-            socket.emit('playerAction', { type: 'startDAS', direction: 'right' });
-            break;
-          case 'ArrowUp':
-          case 'KeyZ':
-            socket.emit('playerAction', { type: 'rotate' });
-            break;
-          case 'ArrowDown':
-            socket.emit('playerAction', { type: 'softDrop' });
-            break;
-          case 'Space':
-            // guard against auto‑repeat when holding space
-            if (!hardDropActiveRef.current) {
-              socket.emit('playerAction', { type: 'hardDrop' });
-              hardDropActiveRef.current = true;
-            }
-            break;
-          default:
-            break;
-        }
-      } else if (gameState.appPhase === 'readyscreen') {
-        // Handle ready toggle on X key press
-        if (e.code === 'KeyX') {
-          const isCurrentlyReady = gameState.readyPlayers && 
-            gameState.readyPlayers.includes(socket.id);
-          console.log('X key pressed, toggling ready state:', !isCurrentlyReady);
-          socket.emit('playerReady', !isCurrentlyReady);
-        }
-      }
-    };
-
-    const handleKeyUp = (e) => {
-      // Only process key events if game is in progress
-      if (gameState.appPhase === 'playing') {
-        switch (e.code) {
-          case 'ArrowLeft':
-          case 'ArrowRight':
-            socket.emit('playerAction', { type: 'endDAS' });
-            break;
-          case 'ArrowDown':
-            socket.emit('playerAction', { type: 'endSoftDrop' });
-            break;
-          case 'Space':
-            // re‑enable hardDrop once key is released
-            hardDropActiveRef.current = false;
-            break;
-          default:
-            break;
-        }
-      }
-    };
-
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-
+    
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [socket, gameState]);
+  }, [handleKeyDown, handleKeyUp]);
 
-  // Room management handlers
-  const handleCreateRoom = useCallback((playerName) => {
+  // Ensure room events are handled on each socket reconnect
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('roomCreated', ({ roomCode, gameState }) => {
+      debugLog('events', `Room created: ${roomCode}`);
+      setGameState(gameState);
+    });
+
+    socket.on('roomJoined', ({ roomCode, gameState }) => {
+      debugLog('events', `Joined room: ${roomCode}`);
+      setGameState(gameState);
+    });
+
+    return () => {
+      socket.off('roomCreated');
+      socket.off('roomJoined');
+    };
+  }, [socket]);
+
+  // Create a room
+  const createRoom = useCallback((playerName) => {
     if (socket) {
+      debugLog('events', 'Creating room with player name:', playerName);
       socket.emit('createRoom', playerName);
     }
   }, [socket]);
-  
-  const handleJoinRoom = useCallback((roomCode, playerName) => {
+
+  // Join a room
+  const joinRoom = useCallback((roomCode, playerName) => {
     if (socket) {
+      debugLog('events', `Joining room ${roomCode} with player name: ${playerName}`);
       socket.emit('joinRoom', { roomCode, playerName });
     }
   }, [socket]);
-  
-  const handleLeaveRoom = useCallback(() => {
+
+  // Leave a room
+  const leaveRoom = useCallback(() => {
     if (socket) {
+      debugLog('events', 'Leaving room');
       socket.emit('leaveRoom');
     }
   }, [socket]);
 
-  // Handle player ready state
-  const handlePlayerReady = useCallback((isReady) => {
+  // Set player ready state
+  const setReady = useCallback((isReady) => {
     if (socket) {
+      debugLog('events', `Setting ready state: ${isReady}`);
       socket.emit('playerReady', isReady);
     }
   }, [socket]);
 
-  // Handle game start
-  const handleStartGame = useCallback(() => {
+  // Start the game (host only)
+  const startGame = useCallback(() => {
     if (socket) {
+      debugLog('events', 'Starting game');
       socket.emit('startGame');
     }
   }, [socket]);
 
-  // Handle game mode change
-  const handleSetGameMode = useCallback((mode) => {
-    if (socket) {
-      socket.emit('setGameMode', mode);
-    }
-  }, [socket]);
-
-  // Handle game over timeout
-  const handleGameOverTimeout = useCallback(() => {
-    setIsGameOver(false);
-    setGameOverData(null);
-  }, []);
-
-  // Get the current background image URL
-  const getCurrentBackgroundUrl = () => {
-    if (!BACKGROUND_IMAGES.length) return null;
-    return `${process.env.PUBLIC_URL}/backgrounds/${BACKGROUND_IMAGES[currentBackgroundIndex]}`;
-  };
-
-  // Show loading or error screen
-  if (isConnecting) {
-    return <div className="App"><h1>Connecting to server...</h1></div>;
-  }
-
+  // Show error message if there's a socket error
   if (socketError) {
     return (
-      <div className="App">
+      <div className="App error-screen">
         <h1>Connection Error</h1>
         <p>{socketError}</p>
         <p>Please check that the server is running and the configuration is correct.</p>
@@ -470,201 +560,49 @@ function App() {
           backgroundImage: `url(${getCurrentBackgroundUrl()})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          transition: 'background-image 1s ease-in-out',
-          minHeight: '100vh'
-        })
+        }),
       }}
-      tabIndex="0"
     >
       {gameState.appPhase === 'homescreen' && (
         <NewHomeScreen
-          onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-          error={error}
+          onCreateRoom={createRoom}
+          onJoinRoom={joinRoom}
         />
       )}
       
       {gameState.appPhase === 'readyscreen' && (
         <ReadyScreen
-          roomCode={gameState.roomCode}
-          players={gameState.players || {}}
-          currentPlayerId={socket?.id}
-          readyPlayers={gameState.readyPlayers || []}
-          onReady={handlePlayerReady}
-          onStartGame={handleStartGame}
-          onLeaveRoom={handleLeaveRoom}
-          onSetGameMode={handleSetGameMode}
-          gameMode={gameState.gameMode}
-          gameInProgress={gameState.gameInProgress}
-          isHost={gameState.players?.[socket?.id]?.isHost}
+          gameState={gameState}
+          socketId={socket ? socket.id : null}
+          onReady={setReady}
+          onLeaveRoom={leaveRoom}
+          onStartGame={startGame}
         />
       )}
-
+      
       {gameState.appPhase === 'playing' && (
-        <div style={{
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          backdropFilter: 'blur(5px)',
-          padding: '20px',
-          borderRadius: '10px',
-          margin: '10px auto',
-          maxWidth: '900px'
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '15px'
-          }}>
-            <h1 style={{ margin: 0, fontSize: '28px', color: '#fff' }}>Tetristributed</h1>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '15px'
-            }}>
-              <div style={{
-                fontSize: '14px',
-                backgroundColor: '#444',
-                padding: '5px 10px',
-                borderRadius: '4px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center'
-              }}>
-                <span style={{fontSize: '10px', color: '#aaa'}}>ROOM</span>
-                <span style={{fontWeight: 'bold'}}>{gameState.roomCode}</span>
-              </div>
-              <div style={{
-                fontSize: '14px',
-                backgroundColor: '#333',
-                padding: '5px 10px',
-                borderRadius: '4px'
-              }}>
-                Player: {socket?.id && socket.id.substring(0, 4)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <BoardStage
-                board={gameState.board || []}
-                players={gameState.players || {}}
-                linesToClear={gameState.linesToClear || []}
-              />
-            </div>
-
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              minWidth: '220px'
-            }}>
-              {/* Integrated Score Panel with Timer */}
-              <ScorePanel
-                score={currentScore}
-                level={level}
-                lastScoreChange={lastScoreChange}
-                elapsedTime={elapsedTime}
-              />
-
-              {/* Players List */}
-              <div style={{
-                backgroundColor: 'rgba(40, 40, 40, 0.9)',
-                padding: '12px',
-                borderRadius: '8px',
-                marginTop: '15px'
-              }}>
-                <h2 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#ccc' }}>Players</h2>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {Object.entries(gameState.players || {}).map(([id, player]) => {
-                    const isCurrentPlayer = id === socket?.id;
-                    const shortId = id.substring(0, 4);
-
-                    return (
-                      <li
-                        key={id}
-                        style={{
-                          margin: '6px 0',
-                          padding: '8px',
-                          backgroundColor: isCurrentPlayer ? '#444' : '#333',
-                          borderLeft: `4px solid ${player.color || '#ccc'}`,
-                          borderRadius: '4px',
-                          transition: 'background-color 0.3s'
-                        }}
-                      >
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between'
-                        }}>
-                          <div>
-                            <span style={{
-                              fontWeight: isCurrentPlayer ? 'bold' : 'normal',
-                              color: isCurrentPlayer ? '#fff' : '#ccc'
-                            }}>
-                              {player.name || `Player ${player.playerNumber || shortId}`}
-                            </span>
-                            {isCurrentPlayer && <span style={{
-                              fontSize: '12px',
-                              marginLeft: '5px',
-                              color: '#ffcc00'
-                            }}>
-                              (You)
-                            </span>}
-                          </div>
-                          <div style={{
-                            backgroundColor: '#222',
-                            padding: '2px 6px',
-                            borderRadius: '3px',
-                            fontSize: '14px',
-                            fontWeight: 'bold'
-                          }}>
-                            {player.score || 0}
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-
-                <div style={{
-                  marginTop: '15px',
-                  padding: '8px',
-                  backgroundColor: '#222',
-                  borderRadius: '4px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '12px', color: '#aaa' }}>GAME MODE</div>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px' }}>
-                    {gameState.gameMode || 'Classic'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Controls Help */}
-              <div style={{
-                backgroundColor: 'rgba(40, 40, 40, 0.7)',
-                padding: '12px',
-                borderRadius: '8px',
-                marginTop: '15px',
-                fontSize: '12px',
-                color: '#aaa'
-              }}>
-                <div style={{ marginBottom: '5px', fontWeight: 'bold', color: '#ccc' }}>Controls:</div>
-                <div>← → : Move</div>
-                <div>↓ : Soft Drop</div>
-                <div>↑ / Z : Rotate</div>
-                <div>Space : Hard Drop</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <>
+          <BoardStage
+            board={gameState.board}
+            players={gameState.players}
+            socketId={socket ? socket.id : null}
+          />
+          <ScorePanel
+            score={currentScore}
+            lastScoreChange={lastScoreChange}
+            level={level}
+            time={elapsedTime}
+          />
+        </>
       )}
-
-      {isGameOver && gameOverData && (
+      
+      {gameState.appPhase === 'gameover' && (
         <GameOverScreen
           gameOverData={gameOverData}
-          currentPlayerId={socket?.id}
-          onTimeout={handleGameOverTimeout}
+          onPlayAgain={() => {
+            setIsGameOver(false);
+            leaveRoom();
+          }}
         />
       )}
     </div>
