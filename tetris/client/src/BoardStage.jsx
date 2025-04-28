@@ -1,6 +1,5 @@
 // client/src/BoardStage.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Konva from 'konva';
 import { Stage, Layer, Group, Rect } from 'react-konva';
 
 /* ===== tweakable constants ======================================= */
@@ -8,7 +7,7 @@ const CELL                = 30;
 const PARTICLES_PER_BLOCK = 75;   // explosion density
 const LOCK_EFFECT         = 'tint';   // 'tint' (brighten) or 'mute' (darken)
 const LOCK_FLASH_MS       = 120;   // ms duration of lock flash
-const CLEAR_STYLE         = 'explode'; // in case we want to add support for another clear animnation
+const CLEAR_STYLE         = 'explode'; // current clear-animation style
 /* ================================================================= */
 
 /* canonical NES/TGM colors */
@@ -18,25 +17,27 @@ const BASE = {
 };
 
 /* color helpers */
-const toRgb = h => [0,2,4].map(i => parseInt(h.slice(1+i,3+i), 16));
-const toHex = rgb => '#' + rgb.map(v =>
-  Math.max(0, Math.min(255, Math.round(v)))
-    .toString(16).padStart(2,'0')
-).join('');
-const mix   = (h, tgt, t) => toHex(toRgb(h).map((v,i) => v + (tgt[i] - v) * t));
-const LIGHT = h => mix(h, [255,255,255], 0.5);
-const MID   = h => mix(h, [255,255,255], 0.25);
-const DARK  = h => mix(h, [0,0,0], 0.5);
-const TINT  = h => mix(h, [255,255,255], 0.6);
-const MUTE  = h => mix(h, [0,0,0], 0.6);
+const toRgb = h => [0, 2, 4].map(i => parseInt(h.slice(1 + i, 3 + i), 16));
+const toHex = rgb =>
+  '#' +
+  rgb
+    .map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
+    .join('');
+const mix   = (h, tgt, t) => toHex(toRgb(h).map((v, i) => v + (tgt[i] - v) * t));
+const LIGHT = h => mix(h, [255, 255, 255], 0.5);
+const MID   = h => mix(h, [255, 255, 255], 0.25);
+const DARK  = h => mix(h, [0, 0, 0],   0.5);
+const TINT  = h => mix(h, [255, 255, 255], 0.6);
+const MUTE  = h => mix(h, [0, 0, 0],   0.6);
 
+// ──────────────────────────────────────────────────────────────────
 export default function BoardStage({ board = [], players = {}, linesToClear = [] }) {
   const rows = board.length;
   const cols = board[0]?.length || 0;
-  const W = cols * CELL;
-  const H = rows * CELL;
+  const W    = cols * CELL;
+  const H    = rows * CELL;
 
-  /* ─── preload sounds ───────────────────────────────────────────── */
+  /* ─── preload sounds ─────────────────────────────────────────── */
   const lockSfx  = useRef(new Audio(`${process.env.PUBLIC_URL}/sounds/lock_sound.wav`));
   const clearSfx = useRef(new Audio(`${process.env.PUBLIC_URL}/sounds/clear.mp3`));
   useEffect(() => {
@@ -46,23 +47,36 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     });
   }, []);
 
-  /* ─── lock-flash canvas overlay ─────────────────────────────────── */
+  /* ─── lock-flash canvas overlay ──────────────────────────────── */
   const flashCanvasRef = useRef(null);
   const [lockFlashes, setLockFlashes] = useState([]);
 
-  /* NEW: flag to ignore the very next lock-flash diff after a board shift */
-  const skipNextLockFlashRef = useRef(false);
+  /* flag that stays TRUE for the entire line-clear sequence       */
+  const clearingInProgressRef = useRef(false);
 
   useEffect(() => {
-    /* ── EARLY EXIT if we just shifted rows after a clear ───────── */
-    if (skipNextLockFlashRef.current) {
-      skipNextLockFlashRef.current = false;
-      if (flashCanvasRef.current) {
-        flashCanvasRef.current.__prevBoard = board.map(r => [...r]); // resync boards
-      }
-      return;  // don’t compute or play any flashes this frame
+    /* ── skip logic: ignore diff while rows are clearing/shifted ─ */
+    const skipThisFrame = clearingInProgressRef.current;
+
+    // if rows are flagged, the 30-frame countdown is active
+    if (linesToClear.length > 0) {
+      clearingInProgressRef.current = true;
+    }
+    // rows list empty again → board has shifted this frame
+    else if (clearingInProgressRef.current && linesToClear.length === 0) {
+      // keep skip true for this frame, but clear for next frame
+      clearingInProgressRef.current = false;
     }
 
+    if (skipThisFrame) {
+      // resync snapshot and bail
+      if (flashCanvasRef.current) {
+        flashCanvasRef.current.__prevBoard = board.map(r => [...r]);
+      }
+      return;
+    }
+
+    /* ── normal diff → produce flashes where new blocks appeared ─ */
     const prev  = flashCanvasRef.current?.__prevBoard || [];
     const fresh = [];
 
@@ -88,8 +102,9 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     }
 
     flashCanvasRef.current.__prevBoard = board.map(row => [...row]);
-  }, [board, rows, cols]);
+  }, [board, rows, cols, linesToClear]);
 
+  /* ─── lock-flash draw loop ───────────────────────────────────── */
   useEffect(() => {
     const canvas = flashCanvasRef.current;
     if (!canvas) return;
@@ -114,9 +129,10 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     return () => cancelAnimationFrame(raf);
   }, [W, H, lockFlashes]);
 
-  /* ─── explosion on line-clear ──────────────────────────────────── */
+  /* ─── explosion on line-clear ────────────────────────────────── */
   const [particles, setParticles] = useState([]);
   const clearHandled = useRef(false);
+
   useEffect(() => {
     if (!linesToClear.length) {
       clearHandled.current = false;
@@ -128,8 +144,8 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     clearSfx.current.currentTime = 0;
     clearSfx.current.play().catch(() => {});
 
-    /* NEW → tell lock-flash effect to ignore next board diff */
-    skipNextLockFlashRef.current = true;
+    // mark that a clear is active so lock-flash will skip
+    clearingInProgressRef.current = true;
 
     const rowsSet  = new Set(linesToClear);
     const newParts = [];
@@ -175,98 +191,102 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     return () => cancelAnimationFrame(raf);
   }, [particles.length]);
 
-  /* ─── memoise locked & active cells ───────────────────────────── */
-  const locked = useMemo(() =>
-    board.flatMap((row, r) => {
-      if (CLEAR_STYLE === 'explode' && linesToClear.includes(r)) return [];
-      return row.map((cell, c) => {
-        if (!cell) return null;
-        return { id: `l-${r}-${c}`, x: c, y: r, color: BASE[cell.value] || '#888' };
-      }).filter(Boolean);
-    }), [board, linesToClear]
+  /* ─── memoised locked & active cell lists ────────────────────── */
+  const locked = useMemo(
+    () =>
+      board.flatMap((row, r) => {
+        if (CLEAR_STYLE === 'explode' && linesToClear.includes(r)) return [];
+        return row
+          .map((cell, c) => {
+            if (!cell) return null;
+            return { id: `l-${r}-${c}`, x: c, y: r, color: BASE[cell.value] || '#888' };
+          })
+          .filter(Boolean);
+      }),
+    [board, linesToClear]
   );
 
-  const active = useMemo(() =>
-    Object.values(players).flatMap(p => {
-      if (p?.isWaitingForNextPiece) return [];
-      const shp = p?.currentPiece?.shape;
-      if (!shp) return [];
-      return shp.flatMap((row, dr) =>
-        row.map((v, dc) => {
-          if (!v) return null;
-          const gx = p.x + dc, gy = p.y + dr;
-          if (
-            gx < 0 || gx >= cols ||
-            gy < 0 || gy >= rows ||
-            (CLEAR_STYLE === 'explode' && linesToClear.includes(gy))
-          ) return null;
-          if (board[gy] && board[gy][gx] !== 0) return null;  // already locked
-          return { id: `a-${gx}-${gy}`, x: gx, y: gy, color: BASE[v] || '#888' };
-        }).filter(Boolean)
-      );
-    }), [players, cols, rows, linesToClear]
+  const active = useMemo(
+    () =>
+      Object.values(players).flatMap(p => {
+        if (p?.isWaitingForNextPiece) return [];
+        const shp = p?.currentPiece?.shape;
+        if (!shp) return [];
+        return shp.flatMap((row, dr) =>
+          row
+            .map((v, dc) => {
+              if (!v) return null;
+              const gx = p.x + dc,
+                gy = p.y + dr;
+              if (
+                gx < 0 ||
+                gx >= cols ||
+                gy < 0 ||
+                gy >= rows ||
+                (CLEAR_STYLE === 'explode' && linesToClear.includes(gy))
+              )
+                return null;
+              if (board[gy] && board[gy][gx] !== 0) return null; // already locked
+              return { id: `a-${gx}-${gy}`, x: gx, y: gy, color: BASE[v] || '#888' };
+            })
+            .filter(Boolean)
+        );
+      }),
+    [players, cols, rows, linesToClear]
   );
 
-  /* ─── glossy Block component ───────────────────────────────────── */
+  /* ─── glossy Block component ─────────────────────────────────── */
   const Block = ({ x, y, color }) => (
     <Group x={x * CELL} y={y * CELL} listening={false}>
+      <Rect width={CELL} height={CELL} fill="transparent" stroke="#666" strokeWidth={1.2} cornerRadius={3} />
       <Rect
-        width={CELL} height={CELL}
-        fill="transparent" stroke="#666" strokeWidth={1.2}
-        cornerRadius={3}
-      />
-      <Rect
-        x={1} y={1} width={CELL - 2} height={CELL - 2}
+        x={1}
+        y={1}
+        width={CELL - 2}
+        height={CELL - 2}
         cornerRadius={2.5}
         fillLinearGradientStartPoint={{ x: 0, y: 0 }}
         fillLinearGradientEndPoint={{ x: 0, y: CELL }}
-        fillLinearGradientColorStops={[
-          0, LIGHT(color),
-          0.45, MID(color),
-          1, DARK(color)
-        ]}
+        fillLinearGradientColorStops={[0, LIGHT(color), 0.45, MID(color), 1, DARK(color)]}
       />
       <Rect
-        x={CELL * 0.15} y={CELL * 0.05}
-        width={CELL * 0.7} height={CELL * 0.25}
+        x={CELL * 0.15}
+        y={CELL * 0.05}
+        width={CELL * 0.7}
+        height={CELL * 0.25}
         cornerRadius={CELL * 0.35}
         fillRadialGradientStartPoint={{ x: CELL * 0.35, y: CELL * 0.2 }}
         fillRadialGradientEndPoint={{ x: CELL * 0.35, y: CELL * 0.2 }}
         fillRadialGradientStartRadius={1}
         fillRadialGradientEndRadius={CELL * 0.35}
-        fillRadialGradientColorStops={[
-          0, 'rgba(255,255,255,0.85)',
-          1, 'rgba(255,255,255,0)'
-        ]}
+        fillRadialGradientColorStops={[0, 'rgba(255,255,255,0.85)', 1, 'rgba(255,255,255,0)']}
       />
     </Group>
   );
 
-  /* ─── render ───────────────────────────────────────────────────── */
+  /* ─── render ─────────────────────────────────────────────────── */
   return (
     <div style={{ position: 'relative', width: W, height: H }}>
       <Stage width={W} height={H}>
         <Layer listening={false}>
           <Rect x={0} y={0} width={W} height={H} fill="#111" />
           <Group opacity={0.12}>
-            {Array(rows + 1).fill().map((_, i) => (
-              <Rect key={`h${i}`} x={0} y={i * CELL} width={W} height={1} fill="#888" />
-            ))}
-            {Array(cols + 1).fill().map((_, i) => (
-              <Rect key={`v${i}`} x={i * CELL} y={0} width={1} height={H} fill="#888" />
-            ))}
+            {Array(rows + 1)
+              .fill()
+              .map((_, i) => <Rect key={`h${i}`} x={0} y={i * CELL} width={W} height={1} fill="#888" />)}
+            {Array(cols + 1)
+              .fill()
+              .map((_, i) => <Rect key={`v${i}`} x={i * CELL} y={0} width={1} height={H} fill="#888" />)}
           </Group>
-
-          {/* locked & active */}
           {locked.map(b => <Block key={b.id} {...b} />)}
           {active.map(b => <Block key={b.id} {...b} />)}
-
-          {/* explosion particles */}
           {particles.map(p => (
             <Rect
               key={p.id}
-              x={p.x} y={p.y}
-              width={p.w} height={p.h}
+              x={p.x}
+              y={p.y}
+              width={p.w}
+              height={p.h}
               fill={p.color}
               opacity={p.life / 40}
               listening={false}
@@ -280,12 +300,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
         ref={flashCanvasRef}
         width={W}
         height={H}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          pointerEvents: 'none'
-        }}
+        style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
       />
     </div>
   );
