@@ -46,11 +46,24 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     });
   }, []);
 
-  /* ─── lock‑flash canvas overlay ─────────────────────────────────── */
+  /* ─── lock-flash canvas overlay ─────────────────────────────────── */
   const flashCanvasRef = useRef(null);
   const [lockFlashes, setLockFlashes] = useState([]);
+
+  /* NEW: flag to ignore the very next lock-flash diff after a board shift */
+  const skipNextLockFlashRef = useRef(false);
+
   useEffect(() => {
-    const prev = flashCanvasRef.current?.__prevBoard || [];
+    /* ── EARLY EXIT if we just shifted rows after a clear ───────── */
+    if (skipNextLockFlashRef.current) {
+      skipNextLockFlashRef.current = false;
+      if (flashCanvasRef.current) {
+        flashCanvasRef.current.__prevBoard = board.map(r => [...r]); // resync boards
+      }
+      return;  // don’t compute or play any flashes this frame
+    }
+
+    const prev  = flashCanvasRef.current?.__prevBoard || [];
     const fresh = [];
 
     for (let r = 0; r < rows; r++) {
@@ -62,6 +75,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
         }
       }
     }
+
     if (fresh.length) {
       lockSfx.current.currentTime = 0;
       lockSfx.current.play().catch(() => {});
@@ -72,6 +86,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
         }, LOCK_FLASH_MS);
       });
     }
+
     flashCanvasRef.current.__prevBoard = board.map(row => [...row]);
   }, [board, rows, cols]);
 
@@ -99,7 +114,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     return () => cancelAnimationFrame(raf);
   }, [W, H, lockFlashes]);
 
-  /* ─── explosion on line‑clear ──────────────────────────────────── */
+  /* ─── explosion on line-clear ──────────────────────────────────── */
   const [particles, setParticles] = useState([]);
   const clearHandled = useRef(false);
   useEffect(() => {
@@ -113,7 +128,10 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
     clearSfx.current.currentTime = 0;
     clearSfx.current.play().catch(() => {});
 
-    const rowsSet = new Set(linesToClear);
+    /* NEW → tell lock-flash effect to ignore next board diff */
+    skipNextLockFlashRef.current = true;
+
+    const rowsSet  = new Set(linesToClear);
     const newParts = [];
     board.forEach((row, r) => {
       row.forEach((cell, c) => {
@@ -182,8 +200,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
             gy < 0 || gy >= rows ||
             (CLEAR_STYLE === 'explode' && linesToClear.includes(gy))
           ) return null;
-          // Skip rendering if the board already has a locked cell here
-          if (board[gy] && board[gy][gx] !== 0) return null;
+          if (board[gy] && board[gy][gx] !== 0) return null;  // already locked
           return { id: `a-${gx}-${gy}`, x: gx, y: gy, color: BASE[v] || '#888' };
         }).filter(Boolean)
       );
@@ -258,7 +275,7 @@ export default function BoardStage({ board = [], players = {}, linesToClear = []
         </Layer>
       </Stage>
 
-      {/* lock‑flash overlay */}
+      {/* lock-flash overlay */}
       <canvas
         ref={flashCanvasRef}
         width={W}

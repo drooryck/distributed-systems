@@ -293,25 +293,52 @@ function updateRoomGameState(roomCode) {
   
   const gameState = rooms[roomCode].gameState;
   
-  // Handle ongoing line clear animation
+  /* ── LINE-CLEAR ANIMATION ────────────────────────────────────── */
   if (gameState.lineClearActive) {
     gameState.lineClearTimer++;
-    
-    // After animation completes, clear the lines
-    if (gameState.lineClearTimer >= 30) { // 30 frames = 0.5 seconds at 60fps
-      const newBoard = [...gameState.board];
-      
-      // Remove cleared lines
-      for (const row of gameState.linesToClear.sort((a, b) => b - a)) {
-        newBoard.splice(row, 1);
-        newBoard.unshift(new Array(newBoard[0].length).fill(0));
+
+    if (gameState.lineClearTimer >= 30) {          // flash finished
+      const cleared      = [...gameState.linesToClear].sort((a, b) => a - b);
+      const cols         = gameState.board[0].length;
+      const emptyRow     = () => new Array(cols).fill(0);
+
+      /* deep-copy board to avoid aliasing rows */
+      const newBoard = gameState.board.map(row => [...row]);
+
+      /* remove cleared rows, then grow fresh rows on top           */
+      for (let i = cleared.length - 1; i >= 0; --i) {
+        newBoard.splice(cleared[i], 1);
       }
-      
+      for (let i = 0; i < cleared.length; ++i) {
+        newBoard.unshift(emptyRow());
+      }
       gameState.board = newBoard;
+
+      /* shift every *active* player that’s above the removed lines */
+      for (const pid of gameState.activePlayers) {
+        const p = gameState.players[pid];
+        if (!p || !p.currentPiece || p.isWaitingForNextPiece) continue;
+
+        // how many cleared rows were *below* the piece’s top edge?
+        const delta = cleared.filter(r => r > p.y).length;
+        if (delta === 0) continue;
+
+        p.y += delta; // keep visual/world position consistent
+
+        /* clamp / re-validate so we never clip into locked cells   */
+        while (!isValidMoveOnBoard(gameState.board, p.currentPiece, p.x, p.y)) {
+          p.y--;                     // move back up until it fits
+          if (p.y < -4) break;       // (-4 is safe sentinel)
+        }
+      }
+
+      // reset animation flags
       gameState.lineClearActive = false;
-      gameState.linesToClear = [];
+      gameState.linesToClear    = [];
+      gameState.lineClearTimer  = 0;
     }
   }
+  /* ── END line-clear section ───────────────────────────────────── */
   
   // Process each active player
   Array.from(gameState.activePlayers).forEach(playerId => {
