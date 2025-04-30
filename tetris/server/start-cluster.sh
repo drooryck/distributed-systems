@@ -1,50 +1,31 @@
 #!/bin/bash
 
-# Start all three nodes of the Tetris server cluster
-echo "Starting Tetris server cluster with 3 nodes..."
+# Start all three servers in the background
+node src/server.js 0 &
+PID0=$!
+echo "Started Server 0 (Leader) with PID $PID0"
 
-# Start Node 1
-echo "Starting Node 1 on port 3001..."
-NODE_ID=node1 node src/clusterServer.js &
-NODE1_PID=$!
-echo "Node 1 started with PID: $NODE1_PID"
+node src/server.js 1 &
+PID1=$!
+echo "Started Server 1 with PID $PID1"
 
-# Wait a moment to ensure the first node is up
-sleep 2
+node src/server.js 2 &
+PID2=$!
+echo "Started Server 2 with PID $PID2"
 
-# Start Node 2
-echo "Starting Node 2 on port 3002..."
-NODE_ID=node2 node src/clusterServer.js &
-NODE2_PID=$!
-echo "Node 2 started with PID: $NODE2_PID"
+# Save PIDs to a file for later shutdown
+echo "$PID0" > ./server0.pid
+echo "$PID1" > ./server1.pid
+echo "$PID2" > ./server2.pid
 
-# Wait a moment
-sleep 2
+echo ""
+echo "All servers started. Server addresses:"
+echo "- Server 0: http://localhost:3001 (Leader)"
+echo "- Server 1: http://localhost:3002"
+echo "- Server 2: http://localhost:3003"
+echo ""
+echo "To kill a server for testing: ./kill-server.sh <server_id>"
+echo "To kill all servers: ./stop-cluster.sh"
 
-# Start Node 3
-echo "Starting Node 3 on port 3003..."
-NODE_ID=node3 node src/clusterServer.js &
-NODE3_PID=$!
-echo "Node 3 started with PID: $NODE3_PID"
-
-echo "All nodes started. Press Ctrl+C to stop all nodes."
-
-# Save PIDs for cleanup
-echo "$NODE1_PID $NODE2_PID $NODE3_PID" > .cluster_pids
-
-# Handle Ctrl+C gracefully
-function cleanup() {
-    echo "Stopping all nodes..."
-    if [ -f .cluster_pids ]; then
-        for pid in $(cat .cluster_pids); do
-            kill $pid 2>/dev/null
-        done
-        rm .cluster_pids
-    fi
-    exit 0
-}
-
-trap cleanup INT
-
-# Wait for all processes
+# Wait for all background processes
 wait

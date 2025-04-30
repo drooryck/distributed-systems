@@ -301,9 +301,46 @@ function handleNewPlayer(gameState, playerId) {
     return gameState;
   }
   
+  // Ensure activePlayers is a Set
+  if (!(gameState.activePlayers instanceof Set)) {
+    gameState.activePlayers = new Set(Array.isArray(gameState.activePlayers) 
+      ? gameState.activePlayers 
+      : Object.keys(gameState.activePlayers || {}));
+  }
+  
   // Check for potential rejoin
   const shortId = playerId.substring(0, 4);
-  if (gameState.disconnectedPlayers[shortId]) {
+  
+  // First, clean up any existing instances of this player (prevent ghost instances)
+  for (const existingId in gameState.players) {
+    const existingPlayer = gameState.players[existingId];
+    if (existingPlayer && existingPlayer.id === shortId) {
+      console.log(`Found existing player instance with id ${shortId}, cleaning up before reconnection`);
+      
+      // Clean up player's blocks from the board
+      if (gameState.board) {
+        gameState.board = gameState.board.map(row => 
+          row.map(cell => {
+            if (cell !== 0 && typeof cell === 'object' && cell.playerId === existingId) {
+              return 0;
+            }
+            return cell;
+          })
+        );
+      }
+      
+      // Remove the existing player
+      delete gameState.players[existingId];
+      gameState.activePlayers.delete(existingId);
+      
+      // Remove from ready players if present
+      gameState.readyPlayers = gameState.readyPlayers.filter(id => id !== existingId);
+      
+      break;  // We only need to remove one instance
+    }
+  }
+  
+  if (gameState.disconnectedPlayers && gameState.disconnectedPlayers[shortId]) {
     console.log(`Player ${shortId} is rejoining`);
     const savedData = gameState.disconnectedPlayers[shortId];
     
@@ -385,6 +422,22 @@ function handleDisconnect(gameState, playerId) {
       if (player.currentPiece) {
         player.currentPiece = null;
         console.log(`Removed piece for disconnected player ${playerId}`);
+      }
+      
+      // Clean up player blocks from the board
+      // We need to create a new board without this player's blocks
+      if (gameState.board) {
+        const newBoard = gameState.board.map(row => 
+          row.map(cell => {
+            // If this is a cell owned by the disconnected player, clear it
+            if (cell !== 0 && typeof cell === 'object' && cell.playerId === playerId) {
+              return 0;
+            }
+            return cell;
+          })
+        );
+        gameState.board = newBoard;
+        console.log(`Cleaned up board from disconnected player ${playerId}`);
       }
       
       // Remove player from active game

@@ -1,8 +1,23 @@
 {
-  "serverAddress": "http://10.250.25.214:3001",
-  "clusterServers": [
-    "http://10.250.25.214:3001",
-    "http://10.250.25.214:3002",
-    "http://10.250.25.214:3003"
-  ]
+  "client": {
+    "serverAddresses": [
+      {
+        "id": 0,
+        "host": "10.250.25.214",
+        "port": 3001
+      },
+      {
+        "id": 1,
+        "host": "10.250.25.214",
+        "port": 3002
+      },
+      {
+        "id": 2,
+        "host": "10.250.25.214",
+        "port": 3003
+      }
+    ],
+    "reconnectInterval": 2000,
+    "debug": true
+  }
 }
