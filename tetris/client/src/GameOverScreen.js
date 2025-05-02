@@ -19,7 +19,14 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
     return () => clearInterval(timer);
   }, [onTimeout]);
 
+  // Make sure we're accessing the correct properties
   const youLost = currentPlayerId === gameOverData.playerId;
+  
+  // Make sure we're explicitly checking for multiplayer mode
+  const isMultiplayer = gameOverData.isMultiplayer === true;
+  
+  // For multiplayer games, ONLY show the total score
+  const scoreToDisplay = isMultiplayer ? gameOverData.totalScore : gameOverData.score;
 
   return (
     <div style={{
@@ -64,9 +71,19 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
           fontSize: '24px',
           margin: '20px 0'
         }}>
-          Final Score: <span style={{ fontWeight: 'bold' }}>
-            {gameOverData.score}
-          </span>
+          {isMultiplayer ? (
+            <div>
+              Team Score: <span style={{ fontWeight: 'bold' }}>
+                {scoreToDisplay}
+              </span>
+            </div>
+          ) : (
+            <div>
+              Final Score: <span style={{ fontWeight: 'bold' }}>
+                {scoreToDisplay}
+              </span>
+            </div>
+          )}
         </div>
 
         <div style={{

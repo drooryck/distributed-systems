@@ -274,15 +274,43 @@ function App() {
           setError(message);
         });
         
-        // Handle game over - clear session
         serverManager.on('gameOver', (data) => {
           console.log('Game over with data:', data);
           
-          // Clear session on game over
-          clearGameSession();
+          // Get all player scores for accurate calculation in multiplayer
+          const playerScores = { ...(gameState?.players || {}) };
           
+          // Calculate total score from all players - this is the most important part
+          const totalScore = Object.values(playerScores).reduce(
+            (sum, player) => sum + (player.score || 0), 0
+          );
+          
+          // Is this a multiplayer game?
+          const playerCount = Object.keys(playerScores).length;
+          const isMultiplayer = playerCount > 1;
+          
+          console.log('Score calculation:', {
+            playerScores,
+            playerCount,
+            isMultiplayer,
+            totalScore,
+            serverScore: data.score,
+            clientScore: currentScore
+          });
+          
+          // Create game over data with guaranteed total score
+          const enhancedData = {
+            ...data,
+            score: data.score !== undefined ? data.score : currentScore,
+            totalScore: totalScore,  // This is the sum of ALL player scores
+            isMultiplayer: isMultiplayer
+          };
+          
+          console.log('Enhanced game over data:', enhancedData);
+          
+          clearGameSession();
           setIsGameOver(true);
-          setGameOverData(data);
+          setGameOverData(enhancedData);
         });
         
         // Handle player joined notification
@@ -380,38 +408,34 @@ function App() {
     };
   }, [gameState?.appPhase]);
 
-  // Update the player list for display and track current player's score
-  const updatePlayerList = useCallback((players) => {
-    if (!players || typeof players !== 'object') return;
-
-    // Map player data to what we need
-    const playerEntries = Object.entries(players);
-    const currentSocketId = serverManager.getSocketId();
-
-    // Update current player score state for the score panel
-    if (currentSocketId) {
-      const currentPlayerEntry = playerEntries.find(([id]) => id === currentSocketId);
-      if (currentPlayerEntry) {
-        const [, currentPlayer] = currentPlayerEntry;
-
+  // Update the player list and score whenever gameState.players changes
+  useEffect(() => {
+    if (gameState && gameState.players && typeof gameState.players === 'object') {
+      // Calculate total score
+      const totalScore = Object.values(gameState.players).reduce(
+        (sum, player) => sum + (player.score || 0), 0
+      );
+      
+      // Store the total score in gameState
+      gameState.totalPlayersScore = totalScore;
+      
+      // Update current player score
+      const currentSocketId = serverManager.getSocketId();
+      if (currentSocketId && gameState.players[currentSocketId]) {
+        const currentPlayer = gameState.players[currentSocketId];
+        
         // Update score if changed
-        if (currentPlayer.score !== currentScore) {
-          const scoreChange = Math.max(0, currentPlayer.score - currentScore);
-          if (scoreChange > 0) {
-            setLastScoreChange(scoreChange);
-            // Reset the score change highlight after 1 second
-            setTimeout(() => setLastScoreChange(0), 1000);
-          }
+        if (currentPlayer.score !== undefined && currentPlayer.score !== currentScore) {
           setCurrentScore(currentPlayer.score);
         }
-
+        
         // Update level if changed
         if (currentPlayer.level && currentPlayer.level !== level) {
           setLevel(currentPlayer.level);
         }
       }
     }
-  }, [currentScore, level]);
+  }, [gameState?.players, currentScore, level, serverManager]);
 
   // Keyboard control handlers
   useEffect(() => {
@@ -693,14 +717,6 @@ function App() {
                 <span style={{fontSize: '10px', color: '#aaa'}}>ROOM</span>
                 <span style={{fontWeight: 'bold'}}>{gameState.roomCode}</span>
               </div>
-              <div style={{
-                fontSize: '14px',
-                backgroundColor: '#333',
-                padding: '5px 10px',
-                borderRadius: '4px'
-              }}>
-                Player: {socketId && socketId.substring(0, 4)}
-              </div>
             </div>
           </div>
 
@@ -722,8 +738,11 @@ function App() {
               <ScorePanel
                 score={currentScore}
                 level={level}
-                lastScoreChange={lastScoreChange}
                 elapsedTime={elapsedTime}
+                isMultiplayer={Object.keys(gameState.players || {}).length > 1}
+                totalPlayersScore={gameState.totalPlayersScore || Object.values(gameState.players || {}).reduce(
+                  (sum, player) => sum + (player.score || 0), 0
+                )}
               />
 
               {/* Players List */}
@@ -737,7 +756,6 @@ function App() {
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {Object.entries(gameState.players || {}).map(([id, player]) => {
                     const isCurrentPlayer = id === socketId;
-                    const shortId = id.substring(0, 4);
 
                     return (
                       <li
@@ -761,7 +779,7 @@ function App() {
                               fontWeight: isCurrentPlayer ? 'bold' : 'normal',
                               color: isCurrentPlayer ? '#fff' : '#ccc'
                             }}>
-                              {player.name || `Player ${player.playerNumber || shortId}`}
+                              {player.name || `Player ${player.playerNumber}`}
                             </span>
                             {isCurrentPlayer && <span style={{
                               fontSize: '12px',
@@ -785,19 +803,6 @@ function App() {
                     );
                   })}
                 </ul>
-
-                <div style={{
-                  marginTop: '15px',
-                  padding: '8px',
-                  backgroundColor: '#222',
-                  borderRadius: '4px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '12px', color: '#aaa' }}>GAME MODE</div>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px' }}>
-                    {gameState.gameMode || 'Classic'}
-                  </div>
-                </div>
               </div>
 
               {/* Controls Help */}
