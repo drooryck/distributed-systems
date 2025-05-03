@@ -360,7 +360,8 @@ function handleNewPlayer(gameState, playerId) {
       lockTimer: 0, isLocking: false,
       entryDelayTimer: 0, isWaitingForNextPiece: false,
       lockResets: 0,
-      justPerformedHardDrop: false // Add this flag for hard drop control
+      justPerformedHardDrop: false, // Add this flag for hard drop control
+      isSoftDropping: false // Add this flag for soft drop control: hold down to soft drop
     };
     
     gameState.activePlayers.add(playerId);
@@ -572,6 +573,29 @@ function clearLines(gameState) {
   return { newBoard: board, linesCleared: linesToClear.length };
 }
 
+// Check if a piece is touching the ground or a locked piece
+function isTouchingGround(board, tetromino, x, y) {
+  if (!tetromino || !tetromino.shape) return false;
+  
+  for (let r = 0; r < tetromino.shape.length; r++) {
+    for (let c = 0; c < tetromino.shape[r].length; c++) {
+      if (tetromino.shape[r][c] !== 0) {
+        const boardY = y + r + 1;
+        const boardX = x + c;
+        
+        // Check if we're at the bottom of the board
+        if (boardY >= board.length) return true;
+        
+        // Check if there's a piece below us
+        if (boardY >= 0 && boardX >= 0 && boardX < board[0].length) {
+          if (board[boardY][boardX] !== 0) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function handlePlayerAction(gameState, playerId, action) {
   const player = gameState.players[playerId];
   if (!player || !player.currentPiece) return gameState;
@@ -626,28 +650,36 @@ function handlePlayerAction(gameState, playerId, action) {
       player.entryDelayTimer = 0;
       break;
     
-    case 'hardDrop':
-      // Move down until collision
-      let hardDropY = y;
-      while (isValidMove(board, currentPiece, x, hardDropY + 1, playerId, gameState.players)) {
-        hardDropY++;
-        player.score += 2; // Award points for hard drop
+      case 'hardDrop': {
+        /* ── slide downward until the very last *valid* row ──────────── */
+        let targetY = y;
+        while (
+          isValidMove(board, currentPiece, x, targetY + 1, playerId, gameState.players)
+        ) {
+          targetY++;
+          player.score += 2;                        // +2 pts per cell (Guideline)
+        }
+      
+        /* ── can we lock here (floor or locked block beneath)? ───────── */
+        const canLockHere = isTouchingGround(board, currentPiece, x, targetY);
+      
+        if (canLockHere) {
+          /* normal hard-drop → instant lock */
+          gameState.board = placeTetromino(board, currentPiece, x, targetY, playerId);
+          const { newBoard, linesCleared } = clearLines(gameState);
+          gameState.board = newBoard;
+          player.score += linesCleared * 100;
+      
+          player.isWaitingForNextPiece = true;
+          player.entryDelayTimer       = 0;
+          player.justPerformedHardDrop = true;      // block turbo-tapping
+        } else {
+          /* bumped another *active* piece → rest above it, stay active  */
+          player.y = targetY;
+          player.justPerformedHardDrop = false;     // allow another hard-drop later
+        }
+        break;
       }
-      
-      // Place the piece and clear lines
-      gameState.board = placeTetromino(board, currentPiece, x, hardDropY, playerId);
-      const { newBoard: updatedBoard, linesCleared: clearedLines } = clearLines(gameState);
-      gameState.board = updatedBoard;
-      player.score += clearedLines * 100;
-      
-      // Prepare for next piece and set hard drop flag
-      player.isWaitingForNextPiece = true;
-      player.entryDelayTimer = 0;
-      
-      // Set flag to prevent rapid hard drops
-      player.justPerformedHardDrop = true;
-      
-      break;
       
     case 'softDrop':
       if (isValidMove(board, currentPiece, x, y + 1, playerId, gameState.players)) {
@@ -655,10 +687,12 @@ function handlePlayerAction(gameState, playerId, action) {
         player.score += 1; // Award points for soft drop
       }
       player.fallSpeed = player.softDropSpeed;
+      player.isSoftDropping = true; // Set soft drop flag
       break;
     
     case 'endSoftDrop':
       player.fallSpeed = 45; // Reset to normal fall speed
+      player.isSoftDropping = false; // Reset soft drop flag
       break;
 
     case 'startDAS':
@@ -702,5 +736,6 @@ module.exports = {
   rotateTetromino,
   clearLines,
   createEmptyBoard,
-  getBoardDimensions
+  getBoardDimensions,
+  isTouchingGround
 };

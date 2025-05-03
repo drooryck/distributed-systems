@@ -441,10 +441,24 @@ function updateRoomGameState(roomCode) {
             debugLog('rooms', `Game over for player ${playerId} in room ${roomCode}`);
             gameState.appPhase = 'gameover';
             
-            // Send game over event to room
+            // Calculate total score and determine if multiplayer
+            const playerCount = gameState.activePlayers.size;
+            const isMultiplayer = playerCount > 1;
+            
+            // Sum up all player scores
+            let totalScore = 0;
+            for (const pid of gameState.activePlayers) {
+              if (gameState.players[pid] && typeof gameState.players[pid].score === 'number') {
+                totalScore += gameState.players[pid].score;
+              }
+            }
+            
+            // Send game over event to room with enhanced data
             io.to(roomCode).emit('gameOver', { 
               playerId, 
               score: player.score,
+              totalScore: totalScore,
+              isMultiplayer: isMultiplayer,
               isCurrentPlayer: true
             });
           
@@ -456,7 +470,7 @@ function updateRoomGameState(roomCode) {
         }
       }
       return; // Skip regular fall logic while waiting
-    } 
+    }
     
     // Handle DAS (Delayed Auto Shift)
     if (player.dasDirection) {
@@ -485,6 +499,7 @@ function updateRoomGameState(roomCode) {
       // Piece can still fall
       if (player.fallTimer >= player.fallSpeed) {
         player.y += 1;
+        if (player.isSoftDropping) player.score += 1;
         player.fallTimer = 0;
         player.isLocking = false;
         player.lockTimer = 0;
