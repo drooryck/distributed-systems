@@ -1,3 +1,6 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// GameOverScreen.js
+// ──────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
 
 const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
@@ -20,6 +23,7 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
   }, [onTimeout]);
 
   const youLost = currentPlayerId === gameOverData.playerId;
+  const isMultiplayer = gameOverData.isMultiplayer;
 
   return (
     <div style={{
@@ -64,9 +68,22 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
           fontSize: '24px',
           margin: '20px 0'
         }}>
-          Final Score: <span style={{ fontWeight: 'bold' }}>
-            {gameOverData.score}
-          </span>
+          {isMultiplayer ? (
+            <>
+              
+              <div style={{ marginTop: '10px', fontSize: '20px' }}>
+                Team Total: <span style={{ fontWeight: 'bold' }}>
+                  {gameOverData.totalScore}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              Final Score: <span style={{ fontWeight: 'bold' }}>
+                {gameOverData.score}
+              </span>
+            </>
+          )}
         </div>
 
         <div style={{

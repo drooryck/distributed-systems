@@ -1,17 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
-const ScorePanel = ({ score = 0, level = 1, lastScoreChange = 0, elapsedTime = 0 }) => {
-  const [isFlashing, setIsFlashing] = useState(false);
-  
-  // Flash animation when score changes
-  useEffect(() => {
-    if (lastScoreChange > 0) {
-      setIsFlashing(true);
-      const timer = setTimeout(() => setIsFlashing(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [lastScoreChange]);
-
+const ScorePanel = ({ score = 0, level = 1, lastScoreChange = 0, elapsedTime = 0, isMultiplayer = false, totalPlayersScore = 0 }) => {
   // Format time as MM:SS:CC
   const formatTime = (timeInMs) => {
     const minutes = Math.floor(timeInMs / 60000);
@@ -20,6 +9,15 @@ const ScorePanel = ({ score = 0, level = 1, lastScoreChange = 0, elapsedTime = 0
     
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${centiseconds.toString().padStart(2, '0')}`;
   };
+
+  // Format score without commas
+  const formatScore = (scoreValue) => {
+    return scoreValue.toString();
+  };
+
+  // The actual displayed score depends on whether we're in multiplayer mode
+  const displayedScore = isMultiplayer ? totalPlayersScore : score;
+  const scoreLabel = isMultiplayer ? "TOTAL SCORE" : "SCORE";
 
   return (
     <div className="score-panel" style={{ 
@@ -63,14 +61,13 @@ const ScorePanel = ({ score = 0, level = 1, lastScoreChange = 0, elapsedTime = 0
         borderRadius: '5px',
         marginBottom: '8px'
       }}>
-        <span style={{ fontSize: '16px', color: '#aaa' }}>SCORE</span>
+        <span style={{ fontSize: '16px', color: '#aaa' }}>{scoreLabel}</span>
         <span style={{ 
           fontSize: '24px', 
           fontWeight: 'bold', 
-          color: isFlashing ? '#ffcc00' : '#fff',
-          transition: 'color 0.2s'
+          color: '#fff',
         }}>
-          {score.toLocaleString()}
+          {formatScore(displayedScore)}
         </span>
       </div>
       
@@ -92,21 +89,6 @@ const ScorePanel = ({ score = 0, level = 1, lastScoreChange = 0, elapsedTime = 0
           {level}
         </span>
       </div>
-      
-      {/* Last Score Change Display */}
-      {lastScoreChange > 0 && (
-        <div style={{ 
-          fontSize: '18px', 
-          color: '#66ff66', 
-          textAlign: 'right',
-          height: '24px',
-          marginTop: '8px',
-          fontWeight: 'bold',
-          animation: 'fadeUp 1s'
-        }}>
-          +{lastScoreChange}
-        </div>
-      )}
       
       {/* Scoring Info */}
       <div style={{ 

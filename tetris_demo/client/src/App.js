@@ -48,6 +48,7 @@ function debugLog(type, message, data) {
 function App() {
   const [socketId, setSocketId] = useState(null);
   const [gameState, setGameState] = useState(null);
+  const gameStateRef = useRef(null);           // FIX: keep freshest gameState
   const [isGameOver, setIsGameOver] = useState(false);
   const [gameOverData, setGameOverData] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -93,7 +94,7 @@ function App() {
             setConnectedServer(`${parsedUrl.hostname}:${parsedUrl.port}`);
             
             // Explicitly request initial state after connection
-            serverManager.emit('requestInitialState'); 
+            serverManager.emit('requestInitialState');
           },
           
           // onStateChange callback
@@ -215,8 +216,6 @@ function App() {
           debugLog('events', 'Received roomLeft event with data:', data);
           
           // Clear session data when leaving room
-          // log weird thing
-          console.log('negerlel');
           clearGameSession();
           
           // Set app phase to homescreen
@@ -276,15 +275,47 @@ function App() {
           setError(message);
         });
         
-        // Handle game over - clear session
+        /* ----------- FIXED gameOver handler (uses ref) ------------------- */
         serverManager.on('gameOver', (data) => {
           console.log('Game over with data:', data);
           
-          // Clear session on game over
-          clearGameSession();
+          // Use the up-to-date game state to calculate true multiplayer totals
+          const current = gameStateRef.current;
+          const playerScores = { ...(current?.players || {}) };
           
+          const playerCount   = Object.keys(playerScores).length;
+          const isMultiplayer = playerCount > 1;
+          
+          const totalScore = Object.values(playerScores).reduce(
+            (sum, player) => sum + (player.score || 0), 0
+          );
+          
+          console.log('Score calculation:', {
+            playerScores,
+            playerCount,
+            isMultiplayer,
+            totalScore,
+            serverScore: data.score,
+            clientScore: currentScore,
+            socketId: serverManager.getSocketId()
+          });
+          
+          // Build enhanced data object
+          const enhancedData = {
+            ...data,
+            score:            data.score !== undefined ? data.score : currentScore, // INDIVIDUAL
+            individualScore:  data.score !== undefined ? data.score : currentScore,
+            totalScore,               // TEAM total
+            isMultiplayer,
+            playerCount,
+            playerScores
+          };
+          
+          console.log('Enhanced game over data:', enhancedData);
+          
+          clearGameSession();
           setIsGameOver(true);
-          setGameOverData(data);
+          setGameOverData(enhancedData);
         });
         
         // Handle player joined notification
@@ -319,6 +350,12 @@ function App() {
       serverManager.disconnect();
     };
   }, []);
+
+  /* keep ref fresh so event handlers never get stale state */
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
 
   // Background rotation effect - only active during gameplay
   useEffect(() => {
@@ -382,38 +419,34 @@ function App() {
     };
   }, [gameState?.appPhase]);
 
-  // Update the player list for display and track current player's score
-  const updatePlayerList = useCallback((players) => {
-    if (!players || typeof players !== 'object') return;
-
-    // Map player data to what we need
-    const playerEntries = Object.entries(players);
-    const currentSocketId = serverManager.getSocketId();
-
-    // Update current player score state for the score panel
-    if (currentSocketId) {
-      const currentPlayerEntry = playerEntries.find(([id]) => id === currentSocketId);
-      if (currentPlayerEntry) {
-        const [, currentPlayer] = currentPlayerEntry;
-
+  // Update the player list and score whenever gameState.players changes
+  useEffect(() => {
+    if (gameState && gameState.players && typeof gameState.players === 'object') {
+      // Calculate total score
+      const totalScore = Object.values(gameState.players).reduce(
+        (sum, player) => sum + (player.score || 0), 0
+      );
+      
+      // Store the total score in gameState
+      gameState.totalPlayersScore = totalScore;
+      
+      // Update current player score
+      const currentSocketId = serverManager.getSocketId();
+      if (currentSocketId && gameState.players[currentSocketId]) {
+        const currentPlayer = gameState.players[currentSocketId];
+        
         // Update score if changed
-        if (currentPlayer.score !== currentScore) {
-          const scoreChange = Math.max(0, currentPlayer.score - currentScore);
-          if (scoreChange > 0) {
-            setLastScoreChange(scoreChange);
-            // Reset the score change highlight after 1 second
-            setTimeout(() => setLastScoreChange(0), 1000);
-          }
+        if (currentPlayer.score !== undefined && currentPlayer.score !== currentScore) {
           setCurrentScore(currentPlayer.score);
         }
-
+        
         // Update level if changed
         if (currentPlayer.level && currentPlayer.level !== level) {
           setLevel(currentPlayer.level);
         }
       }
     }
-  }, [currentScore, level]);
+  }, [gameState?.players, currentScore, level, serverManager]);
 
   // Keyboard control handlers
   useEffect(() => {
@@ -441,7 +474,7 @@ function App() {
             serverManager.emit('playerAction', { type: 'softDrop' });
             break;
           case 'Space':
-            // guard against auto‑repeat when holding space
+            // guard against auto-repeat when holding space
             if (!hardDropActiveRef.current) {
               serverManager.emit('playerAction', { type: 'hardDrop' });
               hardDropActiveRef.current = true;
@@ -473,7 +506,7 @@ function App() {
             serverManager.emit('playerAction', { type: 'endSoftDrop' });
             break;
           case 'Space':
-            // re‑enable hardDrop once key is released
+            // re-enable hardDrop once key is released
             hardDropActiveRef.current = false;
             break;
           default:
@@ -695,14 +728,6 @@ function App() {
                 <span style={{fontSize: '10px', color: '#aaa'}}>ROOM</span>
                 <span style={{fontWeight: 'bold'}}>{gameState.roomCode}</span>
               </div>
-              <div style={{
-                fontSize: '14px',
-                backgroundColor: '#333',
-                padding: '5px 10px',
-                borderRadius: '4px'
-              }}>
-                Player: {socketId && socketId.substring(0, 4)}
-              </div>
             </div>
           </div>
 
@@ -724,8 +749,11 @@ function App() {
               <ScorePanel
                 score={currentScore}
                 level={level}
-                lastScoreChange={lastScoreChange}
                 elapsedTime={elapsedTime}
+                isMultiplayer={Object.keys(gameState.players || {}).length > 1}
+                totalPlayersScore={gameState.totalPlayersScore || Object.values(gameState.players || {}).reduce(
+                  (sum, player) => sum + (player.score || 0), 0
+                )}
               />
 
               {/* Players List */}
@@ -739,7 +767,6 @@ function App() {
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {Object.entries(gameState.players || {}).map(([id, player]) => {
                     const isCurrentPlayer = id === socketId;
-                    const shortId = id.substring(0, 4);
 
                     return (
                       <li
@@ -763,7 +790,7 @@ function App() {
                               fontWeight: isCurrentPlayer ? 'bold' : 'normal',
                               color: isCurrentPlayer ? '#fff' : '#ccc'
                             }}>
-                              {player.name || `Player ${player.playerNumber || shortId}`}
+                              {player.name || `Player ${player.playerNumber}`}
                             </span>
                             {isCurrentPlayer && <span style={{
                               fontSize: '12px',
@@ -787,19 +814,6 @@ function App() {
                     );
                   })}
                 </ul>
-
-                <div style={{
-                  marginTop: '15px',
-                  padding: '8px',
-                  backgroundColor: '#222',
-                  borderRadius: '4px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '12px', color: '#aaa' }}>GAME MODE</div>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', marginTop: '4px' }}>
-                    {gameState.gameMode || 'Classic'}
-                  </div>
-                </div>
               </div>
 
               {/* Controls Help */}
