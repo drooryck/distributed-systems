@@ -1,0 +1,11 @@
+{
+  "servers": [
+    {
+      "id": 0,
+      "host": "your-app-name.onrender.com",
+      "port": 443,
+      "clusterPort": 444
+    }
+  ],
+  "heartbeatInterval": 3000
+}

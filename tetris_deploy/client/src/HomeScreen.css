@@ -1,0 +1,223 @@
+.homescreen {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #121212;
+  background-image: url('../public/backgrounds/tetris-1920-x-1080-background-hyihqau5t3lalo4e.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  padding: 20px;
+  position: relative;
+}
+
+.homescreen::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  z-index: 0;
+}
+
+.homescreen-container {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+  width: 100%;
+  background-color: rgba(30, 30, 40, 0.9);
+  border-radius: 10px;
+  box-shadow: 0 0 40px rgba(0, 100, 255, 0.3);
+  padding: 40px;
+  text-align: center;
+  color: #fff;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(100, 100, 255, 0.3);
+}
+
+.game-title {
+  font-size: 48px;
+  margin: 0;
+  background: linear-gradient(135deg, #66ccff, #0066ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 20px rgba(100, 200, 255, 0.5);
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.game-subtitle {
+  font-size: 18px;
+  color: #aaccff;
+  margin-bottom: 40px;
+  font-weight: 300;
+  letter-spacing: 1px;
+}
+
+.main-menu,
+.join-room {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.player-name-input,
+.room-code-input {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.player-name-input label,
+.room-code-input label {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: #aabbcc;
+}
+
+.player-name-input input,
+.room-code-input input {
+  padding: 12px 15px;
+  border: 1px solid #334455;
+  border-radius: 6px;
+  background-color: #1a1a22;
+  color: #ffffff;
+  font-size: 16px;
+  transition: all 0.2s ease;
+}
+
+.player-name-input input:focus,
+.room-code-input input:focus {
+  outline: none;
+  border-color: #4477ff;
+  box-shadow: 0 0 5px rgba(66, 119, 255, 0.5);
+}
+
+.buttons-container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 10px;
+}
+
+.menu-button {
+  padding: 14px 20px;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  text-transform: uppercase;
+}
+
+.create-button {
+  background: linear-gradient(135deg, #44cc66, #229944);
+  color: white;
+  box-shadow: 0 4px 10px rgba(40, 200, 70, 0.3);
+}
+
+.create-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(40, 200, 70, 0.4);
+}
+
+.join-button {
+  background: linear-gradient(135deg, #4477ff, #2255dd);
+  color: white;
+  box-shadow: 0 4px 10px rgba(40, 100, 255, 0.3);
+}
+
+.join-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(40, 100, 255, 0.4);
+}
+
+.join-button:disabled {
+  background: linear-gradient(135deg, #666, #444);
+  transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.back-button {
+  background-color: #333;
+  color: #ccc;
+}
+
+.back-button:hover {
+  background-color: #444;
+}
+
+.button-separator {
+  color: #888;
+  font-size: 14px;
+  margin: 5px 0;
+}
+
+.error-message {
+  color: #ff6666;
+  font-size: 14px;
+  margin-top: 8px;
+  text-align: center;
+  padding: 8px;
+  background-color: rgba(255, 50, 50, 0.1);
+  border-radius: 4px;
+}
+
+.footer {
+  margin-top: 50px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.controls-info h3 {
+  font-size: 16px;
+  color: #aabbcc;
+  margin-bottom: 10px;
+}
+
+.controls-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+}
+
+.control-item {
+  font-size: 14px;
+  color: #ccccdd;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.key {
+  display: inline-block;
+  padding: 3px 8px;
+  background-color: #333;
+  border-radius: 4px;
+  color: #fff;
+  font-family: monospace;
+  font-size: 12px;
+  box-shadow: inset 0 -2px 0 #222;
+}
+
+@media (max-width: 576px) {
+  .homescreen-container {
+    padding: 25px 15px;
+  }
+  
+  .game-title {
+    font-size: 36px;
+  }
+  
+  .controls-list {
+    flex-direction: column;
+    align-items: center;
+  }
+}

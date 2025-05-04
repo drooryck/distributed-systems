@@ -1,0 +1,110 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tetristributed Memory Usage Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .chart-container { width: 800px; height: 400px; margin-bottom: 30px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <h1>Tetristributed Memory Usage Report</h1>
+  <div class="chart-container">
+    <canvas id="memoryChart"></canvas>
+  </div>
+  
+  <h2>Statistics</h2>
+  <table>
+    <tr>
+      <th>Metric</th>
+      <th>Min (MB)</th>
+      <th>Max (MB)</th>
+      <th>Avg (MB)</th>
+    </tr>
+    <tr>
+      <td>Heap Used</td>
+      <td>Infinity</td>
+      <td>-Infinity</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <td>RSS</td>
+      <td>Infinity</td>
+      <td>-Infinity</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <td>Heap Total</td>
+      <td>Infinity</td>
+      <td>-Infinity</td>
+      <td>NaN</td>
+    </tr>
+  </table>
+  
+  <h2>Raw Data</h2>
+  <table>
+    <tr>
+      <th>Time</th>
+      <th>Heap Used (MB)</th>
+      <th>RSS (MB)</th>
+      <th>Heap Total (MB)</th>
+    </tr>
+    
+  </table>
+
+  <script>
+    const ctx = document.getElementById('memoryChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Heap Used (MB)',
+            data: [],
+            borderColor: 'rgb(255, 99, 132)',
+            tension: 0.1
+          },
+          {
+            label: 'RSS (MB)',
+            data: [],
+            borderColor: 'rgb(54, 162, 235)',
+            tension: 0.1
+          },
+          {
+            label: 'Heap Total (MB)',
+            data: [],
+            borderColor: 'rgb(75, 192, 192)',
+            tension: 0.1
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Memory (MB)'
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Time'
+            }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
+  
