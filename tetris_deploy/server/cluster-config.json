@@ -2,7 +2,7 @@
   "servers": [
     {
       "id": 0,
-      "host": "your-app-name.onrender.com",
+      "host": "tetristributed.onrender.com",
       "port": 443,
       "clusterPort": 444
     }
