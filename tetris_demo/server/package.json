@@ -7,7 +7,13 @@
         "start:cluster": "chmod +x ./start-cluster.sh && ./start-cluster.sh",
         "kill": "chmod +x ./kill-server.sh && ./kill-server.sh",
         "stop:cluster": "chmod +x ./stop-cluster.sh && ./stop-cluster.sh",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "jest",
+        "test:unit": "jest tests/unit",
+        "test:integration": "jest tests/integration",
+        "test:load": "npx artillery run tests/load/basic-load.yml",
+        "test:load:profile": "node tests/load/memory-profile.js",
+        "test:fault": "node tests/fault/network-conditions.js",
+        "test:all": "npm run test:unit && npm run test:integration"
     },
     "keywords": [],
     "author": "",
@@ -18,5 +24,10 @@
         "socket.io": "^4.8.1",
         "socket.io-client": "^4.8.1",
         "uuid": "^11.1.0"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "socket.io-mock": "^1.3.2",
+        "supertest": "^7.1.0"
     }
 }

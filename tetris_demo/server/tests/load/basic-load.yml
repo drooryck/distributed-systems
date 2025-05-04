@@ -1,0 +1,197 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 30
+      arrivalRate: 2
+      rampTo: 10
+      name: "Warm up - gradually increase load"
+    - duration: 60
+      arrivalRate: 10
+      name: "Sustained moderate load"
+    - duration: 30
+      arrivalRate: 10
+      rampTo: 20
+      name: "Ramp up to peak load"
+    - duration: 60
+      arrivalRate: 20
+      name: "Sustained peak load"
+    - duration: 30
+      arrivalRate: 20
+      rampTo: 5
+      name: "Ramp down"
+  socketio:
+    transports: ["websocket"]
+
+scenarios:
+  - name: "Multiple players creating and joining rooms"
+    engine: "socketio"
+    flow:
+      # Connect and randomize behavior
+      - function: "selectBehavior"
+      
+      # Create room path
+      - think: 1
+      - function: "createGameRoom"
+      
+      # Engage in some gameplay
+      - think: 2
+      - function: "simulateGameActions"
+      
+      # Disconnect after some time
+      - think: 10
+      - function: "disconnectPlayer"
+
+functions:
+  - selectBehavior: |
+      module.exports = function(context, events, done) {
+        // Randomly decide if this user will be a host or joiner
+        context.vars.isHost = Math.random() < 0.3;  // 30% chance to be host
+        
+        // Generate unique player name
+        context.vars.playerName = `Player-${Math.floor(Math.random() * 100000)}`;
+        
+        // Done immediately
+        return done();
+      }
+
+  - createGameRoom: |
+      module.exports = function(context, events, done) {
+        const socket = context.vars.socketio;
+        
+        if (context.vars.isHost) {
+          // Host creates a new room
+          socket.emit('createRoom', context.vars.playerName);
+          
+          socket.on('roomCreated', (data) => {
+            context.vars.roomCode = data.roomCode;
+            console.log(`Host ${context.vars.playerName} created room ${context.vars.roomCode}`);
+            
+            // Player is ready
+            socket.emit('playerReady', { roomCode: context.vars.roomCode });
+            
+            // If alone, start the game after a delay
+            setTimeout(() => {
+              socket.emit('startGame', { roomCode: context.vars.roomCode });
+            }, 3000);
+            
+            done();
+          });
+        } else {
+          // Joiner looks for an existing room if available
+          // First check if there are rooms already stored by hosts
+          if (global.loadTestRooms && global.loadTestRooms.length > 0) {
+            const randomIndex = Math.floor(Math.random() * global.loadTestRooms.length);
+            context.vars.roomCode = global.loadTestRooms[randomIndex];
+            
+            // Try to join the room
+            socket.emit('joinRoom', { 
+              roomCode: context.vars.roomCode, 
+              playerName: context.vars.playerName 
+            });
+            
+            socket.on('joinedRoom', (data) => {
+              console.log(`Player ${context.vars.playerName} joined room ${context.vars.roomCode}`);
+              
+              // Mark as ready
+              socket.emit('playerReady', { roomCode: context.vars.roomCode });
+              done();
+            });
+            
+            socket.on('error', (err) => {
+              // If join fails, create a new room instead
+              console.log(`Join failed, creating new room instead: ${err}`);
+              context.vars.isHost = true;
+              socket.emit('createRoom', context.vars.playerName);
+              done();
+            });
+          } else {
+            // No rooms available, create a new room
+            context.vars.isHost = true;
+            socket.emit('createRoom', context.vars.playerName);
+            
+            socket.on('roomCreated', (data) => {
+              context.vars.roomCode = data.roomCode;
+              console.log(`Player ${context.vars.playerName} created room ${context.vars.roomCode} (fallback)`);
+              
+              // Store room code globally
+              if (!global.loadTestRooms) global.loadTestRooms = [];
+              global.loadTestRooms.push(context.vars.roomCode);
+              
+              // Player is ready
+              socket.emit('playerReady', { roomCode: context.vars.roomCode });
+              
+              // If alone, start the game after a delay
+              setTimeout(() => {
+                socket.emit('startGame', { roomCode: context.vars.roomCode });
+              }, 3000);
+              
+              done();
+            });
+          }
+        }
+      }
+      
+  - simulateGameActions: |
+      module.exports = function(context, events, done) {
+        const socket = context.vars.socketio;
+        const roomCode = context.vars.roomCode;
+        
+        // Listen for game state updates
+        socket.on('gameState', (gameState) => {
+          // Only take action if the game is in playing mode
+          if (gameState && gameState.appPhase === 'playing') {
+            // Game is active, can send actions
+            context.vars.inActiveGame = true;
+          }
+        });
+        
+        // Handle game over event
+        socket.on('gameOver', (data) => {
+          context.vars.inActiveGame = false;
+          console.log(`Game over in room ${context.vars.roomCode} with score: ${data.score || 0}`);
+        });
+        
+        // Send a series of random actions
+        const actionTypes = ['moveLeft', 'moveRight', 'rotate', 'hardDrop', 'softDrop', 'endSoftDrop'];
+        const sendRandomAction = () => {
+          if (context.vars.inActiveGame) {
+            const action = {
+              type: actionTypes[Math.floor(Math.random() * actionTypes.length)],
+              roomCode: roomCode
+            };
+            socket.emit('playerAction', action);
+          }
+        };
+        
+        // Send actions at random intervals 
+        context.vars.actionIntervalId = setInterval(() => {
+          sendRandomAction();
+        }, 500 + Math.random() * 1000);
+        
+        // Don't finish immediately - this function sets up recurring actions
+        // The disconnectPlayer function will clean up the interval
+        done();
+      }
+      
+  - disconnectPlayer: |
+      module.exports = function(context, events, done) {
+        // Clean up the action interval
+        if (context.vars.actionIntervalId) {
+          clearInterval(context.vars.actionIntervalId);
+        }
+        
+        // Remove room from global pool if this was a host
+        if (context.vars.isHost && global.loadTestRooms && global.loadTestRooms.includes(context.vars.roomCode)) {
+          const index = global.loadTestRooms.indexOf(context.vars.roomCode);
+          if (index !== -1) {
+            global.loadTestRooms.splice(index, 1);
+          }
+        }
+        
+        // Leave room message
+        const socket = context.vars.socketio;
+        socket.emit('leaveRoom', { roomCode: context.vars.roomCode });
+        
+        console.log(`Player ${context.vars.playerName} disconnecting from room ${context.vars.roomCode}`);
+        done();
+      }
