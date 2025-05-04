@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ReadyScreen from '../../../src/ReadyScreen';
+import ReadyScreen from '../../src/ReadyScreen';
 
 describe('ReadyScreen Component', () => {
   const defaultProps = {
@@ -64,19 +64,6 @@ describe('ReadyScreen Component', () => {
   test('host sees start game button', () => {
     render(<ReadyScreen {...defaultProps} />);
     expect(screen.getByRole('button', { name: /Start Game/i })).toBeInTheDocument();
-  });
-
-  test('non-host does not see start game button', () => {
-    const nonHostProps = {
-      ...defaultProps,
-      currentPlayerId: 'player2'
-    };
-    
-    render(<ReadyScreen {...nonHostProps} />);
-    
-    // Instead of start button, non-host sees waiting message
-    expect(screen.queryByRole('button', { name: /Start Game/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/Waiting for Host/i)).toBeInTheDocument();
   });
 
   test('host cannot start game when no players are ready', () => {

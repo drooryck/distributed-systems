@@ -1,6 +1,6 @@
 // Session storage utilities for game persistence across server failovers
 
-const GAME_SESSION_KEY = 'tetris_game_session';
+const GAME_SESSION_KEY = 'tetrisGameSession';
 
 /**
  * Save the current game session data to localStorage

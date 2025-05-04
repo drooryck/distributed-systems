@@ -29,7 +29,9 @@ module.exports = {
   testMatch: [
     "**/__tests__/**/*.js?(x)",
     "**/?(*.)+(spec|test).js?(x)",
-    "**/tests/**/*.test.js?(x)"
+    "**/tests/**/*.test.js?(x)",
+    "**/tests/e2e/**/*.test.js?(x)",
+    "**/tests/e2e/**/*.spec.js?(x)"
   ],
 
   // A map from regular expressions to module names that allow to stub out resources with a single module
@@ -42,12 +44,28 @@ module.exports = {
   setupFilesAfterEnv: [
     "<rootDir>/src/setupTests.js"
   ],
-
+  
   // Transform files with babel-jest
   transform: {
-    "^.+\\.(js|jsx|ts|tsx)$": "<rootDir>/node_modules/babel-jest"
+    "^.+\\.(js|jsx|ts|tsx)$": "babel-jest"
+  },
+  
+  // Tell Jest to handle ES modules
+  transformIgnorePatterns: [
+    "/node_modules/(?!(@testing-library|react-konva|konva)/)"
+  ],
+  
+  // Set Jest to use an environment that supports ESM
+  testEnvironmentOptions: {
+    customExportConditions: ['node', 'node-addons']
   },
 
+  // Indicate this is an ESM project - only including .jsx since .js is inferred
+  extensionsToTreatAsEsm: ['.jsx'],
+
   // Indicates whether each individual test should be reported during the run
-  verbose: true
+  verbose: true,
+  
+  // Increase timeout for e2e tests
+  testTimeout: 30000
 };

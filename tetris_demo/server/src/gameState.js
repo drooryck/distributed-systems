@@ -410,6 +410,11 @@ function handleDisconnect(gameState, playerId) {
     
     // If game in progress, save player data for potential rejoin
     if (gameState.appPhase === 'playing') {
+      // Initialize disconnectedPlayers if it doesn't exist
+      if (!gameState.disconnectedPlayers) {
+        gameState.disconnectedPlayers = {};
+      }
+      
       // Save player data for potential rejoin
       gameState.disconnectedPlayers[player.id] = {
         playerNumber: player.playerNumber,

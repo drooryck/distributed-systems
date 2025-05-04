@@ -18,8 +18,8 @@ describe('Socket.IO Events Integration', () => {
       serverSocket = socket;
     });
     
-    // Start the server
-    httpServer.listen(() => {
+    // Start the server on a dynamic port (0) to avoid conflicts
+    httpServer.listen(0, () => {
       // Get the port that was assigned
       const port = httpServer.address().port;
       
@@ -29,10 +29,26 @@ describe('Socket.IO Events Integration', () => {
     });
   });
   
+  // Clean up all event listeners between tests
+  beforeEach(() => {
+    clientSocket.removeAllListeners('gameState');
+    clientSocket.removeAllListeners('roomCreated');
+    clientSocket.removeAllListeners('joinedRoom');
+    clientSocket.removeAllListeners('gameOver');
+    
+    serverSocket.removeAllListeners('createRoom');
+    serverSocket.removeAllListeners('joinRoom');
+    serverSocket.removeAllListeners('playerReady');
+    serverSocket.removeAllListeners('startGame');
+    serverSocket.removeAllListeners('playerAction');
+  });
+  
   afterAll(() => {
     // Cleanup all connections
+    if (clientSocket.connected) {
+      clientSocket.disconnect();
+    }
     io.close();
-    clientSocket.close();
     httpServer.close();
   });
   

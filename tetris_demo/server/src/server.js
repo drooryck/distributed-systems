@@ -9,6 +9,10 @@ const ClusterManager = require('./clusterManager');
 // Parse server ID from command line arguments
 const SERVER_ID = parseInt(process.argv[2] || '0', 10);
 
+// In test environment, use a different port range or 0 for auto-assignment
+const BASE_PORT = process.env.NODE_ENV === 'test' ? 0 : 3001;
+const PORT = BASE_PORT === 0 ? 0 : BASE_PORT + parseInt(SERVER_ID || '0');
+
 // Import game state functions
 const { 
   createGameState, 
@@ -1090,7 +1094,6 @@ io.on('connection', (socket) => {
 });
 
 // Start server
-const PORT = parseInt(SERVER_ID) === 0 ? 3001 : (3001 + parseInt(SERVER_ID));
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Tetris server ${SERVER_ID} running on port ${PORT}`);
   

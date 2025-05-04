@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
-import { saveGameSession, getGameSession, clearGameSession } from '../../../src/utils/gameSession';
-import useGameSession from '../../../src/hooks/useGameSession';
+import { saveGameSession, getGameSession, clearGameSession } from '../../src/utils/sessionStorage';
+import useGameSession from '../../src/hooks/useGameSession';
 
 // Mock the localStorage
 const mockLocalStorage = (() => {
@@ -53,11 +53,24 @@ describe('Game Session Hooks', () => {
     
     saveGameSession(sessionData);
     
+    // Check that setItem was called
     expect(mockLocalStorage.setItem).toHaveBeenCalled();
-    expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
-      'tetrisGameSession', 
-      JSON.stringify(sessionData)
-    );
+    
+    // Get the actual data that was saved
+    const callArgs = mockLocalStorage.setItem.mock.calls[0];
+    const [key, serializedValue] = callArgs;
+    const parsedValue = JSON.parse(serializedValue);
+    
+    // Verify the key is correct
+    expect(key).toBe('tetrisGameSession');
+    
+    // Verify the saved data contains our original values
+    expect(parsedValue.roomCode).toBe(sessionData.roomCode);
+    expect(parsedValue.playerName).toBe(sessionData.playerName);
+    expect(parsedValue.socketId).toBe(sessionData.socketId);
+    
+    // Also verify timestamp was added
+    expect(parsedValue.timestamp).toBeDefined();
   });
   
   test('getGameSession retrieves data from localStorage', () => {

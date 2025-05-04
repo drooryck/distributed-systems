@@ -8,8 +8,9 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "test:unit": "react-scripts test --watchAll=false --testPathPattern 'src/.*/__tests__/.*\\.test\\.js$|tests/unit/.*\\.test\\.js$'",
-    "test:integration": "react-scripts test --testPathPattern=tests/integration",
+    "test:unit": "jest src/__tests__/unit tests/unit",
+    "test:integration": "jest tests/integration",
+    "test:e2e": "jest tests/e2e",
     "test:coverage": "react-scripts test --coverage",
     "test:all": "react-scripts test",
     "eject": "react-scripts eject"

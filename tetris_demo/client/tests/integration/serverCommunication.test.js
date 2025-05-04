@@ -1,16 +1,17 @@
-import { act, renderHook } from '@testing-library/react-hooks';
 import io from 'socket.io-client';
 
 // Mock socket.io-client
 jest.mock('socket.io-client', () => {
   const mockOn = jest.fn();
   const mockEmit = jest.fn();
+  const mockOnce = jest.fn();
   const mockConnect = jest.fn();
   const mockDisconnect = jest.fn();
   
   return jest.fn(() => ({
     on: mockOn,
     emit: mockEmit,
+    once: mockOnce,
     connect: mockConnect,
     disconnect: mockDisconnect,
     id: 'mock-socket-id',
@@ -18,61 +19,66 @@ jest.mock('socket.io-client', () => {
   }));
 });
 
-// Create a simple hook that wraps socket.io functionality for testing
-const useSocketIntegration = () => {
-  const socket = io('http://localhost:3000');
+// Create a socket communication class for testing
+class SocketCommunication {
+  constructor() {
+    this.socket = io('http://localhost:3001');
+  }
   
-  const createRoom = (playerName) => {
-    socket.emit('createRoom', playerName);
-  };
+  createRoom(playerName) {
+    this.socket.emit('createRoom', playerName);
+  }
   
-  const joinRoom = (roomCode, playerName) => {
-    socket.emit('joinRoom', { roomCode, playerName });
-  };
+  joinRoom(roomCode, playerName) {
+    this.socket.emit('joinRoom', { roomCode, playerName });
+  }
   
-  const playerReady = (roomCode) => {
-    socket.emit('playerReady', { roomCode });
-  };
+  playerReady(roomCode) {
+    this.socket.emit('playerReady', { roomCode });
+  }
   
-  const startGame = (roomCode) => {
-    socket.emit('startGame', { roomCode });
-  };
+  startGame(roomCode) {
+    this.socket.emit('startGame', { roomCode });
+  }
   
-  const sendPlayerAction = (action) => {
-    socket.emit('playerAction', action);
-  };
+  sendPlayerAction(action) {
+    this.socket.emit('playerAction', action);
+  }
   
-  const listenForEvents = (callback) => {
-    socket.on('roomCreated', (data) => callback('roomCreated', data));
-    socket.on('joinedRoom', (data) => callback('joinedRoom', data));
-    socket.on('gameState', (data) => callback('gameState', data));
-    socket.on('gameOver', (data) => callback('gameOver', data));
-  };
-  
-  return {
-    socket,
-    createRoom,
-    joinRoom,
-    playerReady,
-    startGame,
-    sendPlayerAction,
-    listenForEvents
-  };
-};
+  listenForEvents(callback) {
+    this.socket.on('roomCreated', (data) => callback('roomCreated', data));
+    this.socket.on('joinedRoom', (data) => callback('joinedRoom', data));
+    this.socket.on('gameState', (data) => callback('gameState', data));
+    this.socket.on('gameOver', (data) => callback('gameOver', data));
+    
+    return () => {
+      this.socket.disconnect();
+    };
+  }
+}
 
 describe('Socket Integration Tests', () => {
+  let socketComm;
+  
   beforeEach(() => {
     jest.clearAllMocks();
+    socketComm = new SocketCommunication();
   });
   
-  test('connects to server and sets up event listeners', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
+  test('connects to server', () => {
     // Should have connected to the server
-    expect(io).toHaveBeenCalledWith('http://localhost:3000');
+    expect(io).toHaveBeenCalledWith('http://localhost:3001');
+  });
+  
+  test('registers event listeners', () => {
+    // Create a mock callback
+    const mockCallback = jest.fn();
+    
+    // Register event listeners
+    socketComm.listenForEvents(mockCallback);
     
     // Should register event listeners
-    const { socket } = result.current;
+    const { socket } = socketComm;
     expect(socket.on).toHaveBeenCalledWith('roomCreated', expect.any(Function));
     expect(socket.on).toHaveBeenCalledWith('joinedRoom', expect.any(Function));
     expect(socket.on).toHaveBeenCalledWith('gameState', expect.any(Function));
@@ -80,75 +86,47 @@ describe('Socket Integration Tests', () => {
   });
   
   test('emits createRoom event with player name', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
-    act(() => {
-      result.current.createRoom('TestPlayer');
-    });
-    
-    expect(result.current.socket.emit).toHaveBeenCalledWith('createRoom', 'TestPlayer');
+    socketComm.createRoom('TestPlayer');
+    expect(socketComm.socket.emit).toHaveBeenCalledWith('createRoom', 'TestPlayer');
   });
   
   test('emits joinRoom event with room code and player name', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
-    act(() => {
-      result.current.joinRoom('ABC123', 'TestPlayer');
-    });
-    
-    expect(result.current.socket.emit).toHaveBeenCalledWith('joinRoom', {
+    socketComm.joinRoom('ABC123', 'TestPlayer');
+    expect(socketComm.socket.emit).toHaveBeenCalledWith('joinRoom', {
       roomCode: 'ABC123',
       playerName: 'TestPlayer'
     });
   });
   
   test('emits playerReady event with room code', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
-    act(() => {
-      result.current.playerReady('ABC123');
-    });
-    
-    expect(result.current.socket.emit).toHaveBeenCalledWith('playerReady', {
+    socketComm.playerReady('ABC123');
+    expect(socketComm.socket.emit).toHaveBeenCalledWith('playerReady', {
       roomCode: 'ABC123'
     });
   });
   
   test('emits startGame event with room code', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
-    act(() => {
-      result.current.startGame('ABC123');
-    });
-    
-    expect(result.current.socket.emit).toHaveBeenCalledWith('startGame', {
+    socketComm.startGame('ABC123');
+    expect(socketComm.socket.emit).toHaveBeenCalledWith('startGame', {
       roomCode: 'ABC123'
     });
   });
   
   test('emits playerAction event with action data', () => {
-    const { result } = renderHook(() => useSocketIntegration());
-    
     const action = { type: 'moveLeft', roomCode: 'ABC123' };
-    
-    act(() => {
-      result.current.sendPlayerAction(action);
-    });
-    
-    expect(result.current.socket.emit).toHaveBeenCalledWith('playerAction', action);
+    socketComm.sendPlayerAction(action);
+    expect(socketComm.socket.emit).toHaveBeenCalledWith('playerAction', action);
   });
   
   test('processes incoming events through callback', () => {
     const mockCallback = jest.fn();
-    const { result } = renderHook(() => useSocketIntegration());
     
-    act(() => {
-      result.current.listenForEvents(mockCallback);
-    });
+    // Register event listeners
+    socketComm.listenForEvents(mockCallback);
     
     // Extract the event handlers
     const eventHandlers = {};
-    const mockOn = result.current.socket.on;
+    const mockOn = socketComm.socket.on;
     mockOn.mock.calls.forEach(call => {
       const [event, handler] = call;
       eventHandlers[event] = handler;
