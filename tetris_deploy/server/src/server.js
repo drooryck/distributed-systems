@@ -66,8 +66,13 @@ app.get('*', (req, res) => {
 // Initialize Socket.IO with CORS settings
 const io = socketIO(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: [
+      "https://tetristributed.vercel.app.vercel.app", 
+      "https://distributed-systems-soww.onrender.com",
+      "*" // For development
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 

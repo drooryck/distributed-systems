@@ -2,7 +2,7 @@
   "servers": [
     {
       "id": 0,
-      "host": "tetristributed.onrender.com",
+      "host": "distributed-systems-soww.onrender.com",
       "port": 443,
       "clusterPort": 444
     }
