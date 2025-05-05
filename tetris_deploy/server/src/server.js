@@ -11,7 +11,7 @@ const SERVER_ID = parseInt(process.argv[2] || '0', 10);
 
 // In test environment, use a different port range or 0 for auto-assignment
 const BASE_PORT = process.env.NODE_ENV === 'test' ? 0 : 3001;
-const PORT = BASE_PORT === 0 ? 0 : BASE_PORT + parseInt(SERVER_ID || '0');
+const PORT = process.env.PORT || (BASE_PORT === 0 ? 0 : BASE_PORT + parseInt(SERVER_ID || '0'));
 
 // Import game state functions
 const { 

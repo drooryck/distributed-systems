@@ -7,5 +7,6 @@
       "clusterPort": 444
     }
   ],
-  "heartbeatInterval": 3000
+  "heartbeatInterval": 2000,
+  "heartbeatTimeout": 6000
 }
