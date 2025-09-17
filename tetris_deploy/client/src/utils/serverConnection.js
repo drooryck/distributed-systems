@@ -28,7 +28,26 @@ class ServerConnectionManager extends EventEmitter {
     this.onConnectedCallback = onConnectedCallback;
     this.onStateChangeCallback = onStateChangeCallback;
 
-    const target = window.location.origin; // same origin as served app
+    let target;
+    try {
+      // First try to get config from config.json
+      const response = await fetch('/config.json');
+      const config = await response.json();
+      
+      // If we're running locally (on localhost:3000), use localhost:3001
+      if (window.location.hostname === 'localhost') {
+        target = 'http://localhost:3001';
+      } else {
+        // Otherwise use the configured server (for Vercel + Render deployment)
+        target = config.client.serverAddresses[0];
+      }
+      
+      this.log(`Connecting to server at ${target}`);
+    } catch (error) {
+      console.error('Failed to load config:', error);
+      target = 'http://localhost:3001'; // fallback for development
+    }
+    
     const socket = io(target, {
       reconnection: true,
       reconnectionAttempts: 5,

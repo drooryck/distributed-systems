@@ -1,7 +1,7 @@
 {
   "client": {
     "serverAddresses": [
-      "https://your-server-url.onrender.com"
+      "https://tetristributed-server.onrender.com"
     ]
   }
 }
