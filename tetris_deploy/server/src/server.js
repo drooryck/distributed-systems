@@ -48,9 +48,8 @@ app.get('/', (req, res) => {
 const io = socketIO(server, {
   cors: {
     origin: [
-      "https://tetristributed.vercel.app",
-      "http://localhost:3000",  // Allow local development
-      "*" // For development
+      "https://*.vercel.app",
+      "http://localhost:3000", 
     ],
     methods: ["GET", "POST"],
     credentials: true
