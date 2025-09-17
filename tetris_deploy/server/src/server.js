@@ -10,7 +10,7 @@ const SERVER_ID = parseInt(process.argv[2] || '0', 10);
 
 // In test environment, use a different port range or 0 for auto-assignment
 const BASE_PORT = process.env.NODE_ENV === 'test' ? 0 : 3001;
-const PORT = process.env.PORT || (BASE_PORT === 0 ? 0 : BASE_PORT + parseInt(SERVER_ID || '0'));
+const PORT = process.env.PORT || 3001;
 
 // Import game state functions
 const { 
@@ -33,22 +33,23 @@ const app = express();
 app.use(cors());
 const server = http.createServer(app);
 
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'Tetris WebSocket server running',
+    endpoints: ['/status']  // This correctly points to your existing status endpoint
+  });
+});
+
 // Single-server mode: no leader redirection middleware
 
 // Serve static files from client build
-app.use(express.static(path.join(__dirname, '../../client/build')));
-
-// Ensure client HTML is served for all routes not explicitly handled
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../client/build/index.html'));
-});
 
 // Initialize Socket.IO with CORS settings
 const io = socketIO(server, {
   cors: {
     origin: [
-      "https://tetristributed.vercel.app.vercel.app", 
-      "https://distributed-systems-soww.onrender.com",
+      "https://tetristributed.vercel.app",
+      "http://localhost:3000",  // Allow local development
       "*" // For development
     ],
     methods: ["GET", "POST"],
