@@ -27,46 +27,36 @@ class ServerConnectionManager extends EventEmitter {
     if (this.initialized) return;
     this.onConnectedCallback = onConnectedCallback;
     this.onStateChangeCallback = onStateChangeCallback;
-
-    let target;
-    try {
-      // First try to get config from config.json
-      const response = await fetch('/config.json');
-      const config = await response.json();
-      
-      // If we're running locally (on localhost:3000), use localhost:3001
-      if (window.location.hostname === 'localhost') {
-        target = 'http://localhost:3001';
-      } else {
-        // Otherwise use the configured server (for Vercel + Render deployment)
-        target = config.client.serverAddresses[0];
-      }
-      
-      this.log(`Connecting to server at ${target}`);
-    } catch (error) {
-      console.error('Failed to load config:', error);
-      target = 'http://localhost:3001'; // fallback for development
-    }
-    
+  
+    // Prefer explicit base URL; fall back to same-origin for dev previews that host the server
+    const explicitBase = process.env.REACT_APP_API_WS; // e.g. https://tetristributed-server.onrender.com
+    const target =
+      window.location.hostname === 'localhost'
+        ? 'http://localhost:3001'
+        : (explicitBase || `${window.location.origin}`);
+  
+    this.log(`Connecting to server at ${target}`);
+  
     const socket = io(target, {
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 10000,
+      timeout: 45000,  // Increased timeout for cold starts
       transports: ['websocket', 'polling']
     });
-
+  
     socket.on('connect', () => {
       this.setActiveServer(socket, { url: target });
     });
-
-    socket.on('connect_error', () => {
+  
+    socket.on('connect_error', (error) => {
+      this.log(`Connection error: ${error.message}`);
       if (this.onStateChangeCallback) {
         this.onStateChangeCallback({ type: 'disconnected' });
       }
     });
-
+  
     socket.on('disconnect', () => {
       if (this.onStateChangeCallback) {
         this.onStateChangeCallback({ type: 'disconnected' });
@@ -75,7 +65,7 @@ class ServerConnectionManager extends EventEmitter {
         this.scheduleReconnect();
       }
     });
-
+  
     this.initialized = true;
   }
   

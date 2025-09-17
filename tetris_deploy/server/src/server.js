@@ -9,7 +9,6 @@ const { v4: uuidv4 } = require('uuid');
 const SERVER_ID = parseInt(process.argv[2] || '0', 10);
 
 // In test environment, use a different port range or 0 for auto-assignment
-const BASE_PORT = process.env.NODE_ENV === 'test' ? 0 : 3001;
 const PORT = process.env.PORT || 3001;
 
 // Import game state functions
@@ -48,7 +47,8 @@ app.get('/', (req, res) => {
 const io = socketIO(server, {
   cors: {
     origin: [
-      "https://*.vercel.app",
+      /https:\/\/.*\.vercel\.app$/,
+      "https://tetristributed-server.onrender.com",
       "http://localhost:3000", 
     ],
     methods: ["GET", "POST"],
@@ -922,7 +922,7 @@ io.on('connection', (socket) => {
 
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Tetris server ${SERVER_ID} running on port ${PORT}`);
+  console.log(`Tetris server running on port ${PORT}`);
 });
 
 // Single-server mode: no leader-specific game loop helper
