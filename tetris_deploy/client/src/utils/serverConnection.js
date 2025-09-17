@@ -29,11 +29,7 @@ class ServerConnectionManager extends EventEmitter {
     this.onStateChangeCallback = onStateChangeCallback;
   
     // Prefer explicit base URL; fall back to same-origin for dev previews that host the server
-    const explicitBase = process.env.REACT_APP_API_WS; // e.g. https://tetristributed-server.onrender.com
-    const target =
-      window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : (explicitBase || `${window.location.origin}`);
+    const target = 'https://tetristributed-server.onrender.com';
   
     this.log(`Connecting to server at ${target}`);
   
