@@ -1,12 +1,7 @@
 {
-  "servers": [
-    {
-      "id": 0,
-      "host": "distributed-systems-soww.onrender.com",
-      "port": 443,
-      "clusterPort": 444
-    }
-  ],
-  "heartbeatInterval": 2000,
-  "heartbeatTimeout": 6000
+  "client": {
+    "serverAddresses": [
+      "https://your-server-url.onrender.com"
+    ]
+  }
 }

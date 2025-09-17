@@ -4,7 +4,6 @@ const socketIO = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const ClusterManager = require('./clusterManager');
 
 // Parse server ID from command line arguments
 const SERVER_ID = parseInt(process.argv[2] || '0', 10);
@@ -34,26 +33,7 @@ const app = express();
 app.use(cors());
 const server = http.createServer(app);
 
-// Add leader redirection middleware - this routes all clients to the leader
-app.use((req, res, next) => {
-  // Skip redirect for API endpoints and status/control paths
-  if (req.path.startsWith('/api') || req.path === '/status' || req.path === '/kill') {
-    return next();
-  }
-  
-  // If cluster is active and this is not the leader, redirect to leader
-  if (clusterManager && !clusterManager.isLeaderServer()) {
-    const leaderConfig = clusterManager.getLeaderConfig();
-    if (leaderConfig) {
-      const leaderUrl = `http://${leaderConfig.host}:${leaderConfig.port}${req.path}`;
-      debugLog('cluster', `Redirecting client to leader at: ${leaderUrl}`);
-      return res.redirect(303, leaderUrl);
-    }
-  }
-  
-  // Continue normal processing if we are the leader or standalone
-  next();
-});
+// Single-server mode: no leader redirection middleware
 
 // Serve static files from client build
 app.use(express.static(path.join(__dirname, '../../client/build')));
@@ -76,14 +56,8 @@ const io = socketIO(server, {
   }
 });
 
-// Initialize cluster manager
+// Single-server mode: no cluster manager
 let clusterManager = null;
-try {
-  clusterManager = new ClusterManager(SERVER_ID);
-  console.log(`Initialized cluster manager for server ${SERVER_ID}`);
-} catch (error) {
-  console.error('Failed to initialize cluster manager:', error);
-}
 
 // Game configuration
 const FRAME_DELAY = 1000 / 60; // 60 FPS
@@ -261,30 +235,57 @@ function leaveRoom(socket) {
     // Log the leave
     debugLog('rooms', `Player ${socket.id} left room ${roomCode}`);
     
-    // Notify other players
-    socket.to(roomCode).emit('playerLeft', {
-      playerId: socket.id,
-      gameState: room.gameState
-    });
-    
-    // If room is empty, clean it up
-    if (room.gameState.activePlayers.size === 0) {
-      cleanupRoom(roomCode);
-      debugLog('rooms', `Room ${roomCode} cleaned up after last player left`);
-    } 
-    // If player was host, assign host to the next player
-    else if (wasHost) {
-      const remainingPlayers = Object.keys(players);
-      if (remainingPlayers.length > 0) {
-        const newHostId = remainingPlayers[0];
-        players[newHostId].isHost = true;
-        
-        // Notify the new host
-        io.to(newHostId).emit('hostAssigned', {
-          gameState: room.gameState
-        });
-        
-        debugLog('rooms', `New host assigned in room ${roomCode}: ${newHostId}`);
+    // If game is in progress, end it immediately
+    if (room.gameState.appPhase === 'playing') {
+      debugLog('rooms', `Game ended due to player disconnect in room ${roomCode}`);
+      
+      // Calculate final scores
+      const playerCount = room.gameState.activePlayers.size;
+      const isMultiplayer = playerCount > 1;
+      let totalScore = 0;
+      for (const pid of room.gameState.activePlayers) {
+        if (room.gameState.players[pid] && typeof room.gameState.players[pid].score === 'number') {
+          totalScore += room.gameState.players[pid].score;
+        }
+      }
+      
+      // Send game over event to all remaining players
+      io.to(roomCode).emit('gameOver', { 
+        playerId: socket.id,
+        score: leavingPlayer.score || 0,
+        totalScore: totalScore,
+        isMultiplayer: isMultiplayer,
+        reason: 'player_disconnected'
+      });
+      
+      // Reset room after timeout
+      setTimeout(() => resetRoom(roomCode), 5000);
+    } else {
+      // Notify other players (only if not in game)
+      socket.to(roomCode).emit('playerLeft', {
+        playerId: socket.id,
+        gameState: room.gameState
+      });
+      
+      // If room is empty, clean it up
+      if (room.gameState.activePlayers.size === 0) {
+        cleanupRoom(roomCode);
+        debugLog('rooms', `Room ${roomCode} cleaned up after last player left`);
+      } 
+      // If player was host, assign host to the next player
+      else if (wasHost) {
+        const remainingPlayers = Object.keys(players);
+        if (remainingPlayers.length > 0) {
+          const newHostId = remainingPlayers[0];
+          players[newHostId].isHost = true;
+          
+          // Notify the new host
+          io.to(newHostId).emit('hostAssigned', {
+            gameState: room.gameState
+          });
+          
+          debugLog('rooms', `New host assigned in room ${roomCode}: ${newHostId}`);
+        }
       }
     }
   }
@@ -535,18 +536,7 @@ function updateRoomGameState(roomCode) {
   // Update room last activity time
   rooms[roomCode].lastActivity = Date.now();
   
-  // If we're the leader, replicate state to followers after update
-  // Convert Set to Array for network transmission
-  if (clusterManager && clusterManager.isLeaderServer()) {
-    const networkGameState = activePlayersToArray(gameState);
-    
-    clusterManager.broadcastState({
-      action: 'gameStateUpdate',
-      roomCode,
-      gameState: networkGameState,
-      timestamp: Date.now()
-    });
-  }
+  // Single-server mode: no state replication to followers
 }
 
 // Reset room after game over
@@ -748,12 +738,7 @@ io.on('connection', (socket) => {
       gameState: room.gameState
     });
     
-    // Save session data for the player for potential reconnection
-    io.to(socket.id).emit('saveSession', {
-      roomCode,
-      playerName,
-      socketId: socket.id
-    });
+    // No session saving - rejoining disabled
   });
 
   // Join existing room
@@ -803,181 +788,16 @@ io.on('connection', (socket) => {
       gameState: room.gameState
     });
     
-    // Save session data for the player for potential reconnection
-    socket.emit('saveSession', {
-      roomCode,
-      playerName,
-      socketId: socket.id
-    });
+    // No session saving - rejoining disabled
     
     // Update room activity
     room.lastActivity = Date.now();
   });
 
-  // Rejoin room (for reconnection after server failure)
+  // Rejoin room - DISABLED: No rejoining allowed, games end on disconnect
   socket.on('rejoinRoom', (data) => {
-    const roomCode = data.roomCode.toUpperCase();
-    const playerName = data.playerName || 'Player';
-    const previousSocketId = data.previousSocketId || '';
-    const wasReady = data.wasReady || false; // Track if player was ready before disconnection
-    
-    debugLog('events', `Player ${socket.id} (${playerName}) attempting to rejoin room ${roomCode}`);
-    
-    // Check if room exists
-    if (!rooms[roomCode]) {
-      // Try to recover room from global cluster state if available
-      if (clusterManager) {
-        // Fix: Use requestRoomFromLeader instead of getGlobalState which doesn't exist
-        if (clusterManager.isLeaderServer()) {
-          debugLog('events', `Room ${roomCode} not found locally and we are the leader`);
-          socket.emit('error', { message: 'Room not found and could not be recovered' });
-          return;
-        } else {
-          // If we're not the leader, try to request the room from the leader
-          debugLog('events', `Requesting room ${roomCode} from leader for player rejoin`);
-          clusterManager.requestRoomFromLeader(roomCode)
-            .then(requestedRoom => {
-              if (requestedRoom) {
-                // Create room with the state from leader
-                rooms[roomCode] = {
-                  gameState: requestedRoom,
-                  createdAt: Date.now(),
-                  lastActivity: Date.now()
-                };
-                
-                // Set up game loop for the recovered room
-                roomGameLoops[roomCode] = setInterval(() => {
-                  if (rooms[roomCode] && rooms[roomCode].gameState.activePlayers.size > 0) {
-                    io.to(roomCode).emit('gameState', rooms[roomCode].gameState);
-                  }
-                }, FRAME_DELAY);
-                
-                // Now that we have the room, continue with rejoin process
-                completeRejoinProcess();
-                
-                debugLog('rooms', `Room ${roomCode} recovered from leader for player rejoin`);
-              } else {
-                socket.emit('error', { message: 'Room not found on any server' });
-              }
-            })
-            .catch(error => {
-              debugLog('errors', `Error requesting room from leader: ${error.message}`);
-              socket.emit('error', { message: 'Failed to recover room data' });
-            });
-          return; // Return early as the above process is async
-        }
-      } else {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-    }
-    
-    // Complete the rejoin process now that we have the room
-    completeRejoinProcess();
-    
-    function completeRejoinProcess() {
-      const room = rooms[roomCode];
-      
-      // Join the socket to the room
-      socket.join(roomCode);
-      socket.roomCode = roomCode;
-      
-      // Check if the player was previously registered in the room
-      let playerExists = false;
-      
-      // Check active players first
-      for (const existingId in room.gameState.players) {
-        const player = room.gameState.players[existingId];
-        if (player && player.name === playerName) {
-          playerExists = true;
-          
-          debugLog('events', `Player ${playerName} found in active players, updating socket ID`);
-          
-          // Remove old player instance but keep their state
-          const oldPlayerState = {...room.gameState.players[existingId]};
-          delete room.gameState.players[existingId];
-          room.gameState.activePlayers.delete(existingId);
-          
-          // Update player with new socket ID but keep their state (score, etc)
-          room.gameState.players[socket.id] = {
-            ...oldPlayerState,
-            id: socket.id.substring(0, 4)
-          };
-          room.gameState.activePlayers.add(socket.id);
-          break;
-        }
-      }
-      
-      // If player was not active, check disconnected players
-      if (!playerExists && room.gameState.disconnectedPlayers) {
-        for (const existingId in room.gameState.disconnectedPlayers) {
-          const player = room.gameState.disconnectedPlayers[existingId];
-          if (player && player.name === playerName) {
-            playerExists = true;
-            
-            debugLog('events', `Player ${playerName} found in disconnected players, restoring state`);
-            
-            // Restore player from disconnected state
-            room.gameState.players[socket.id] = {
-              ...player,
-              id: socket.id.substring(0, 4)
-            };
-            room.gameState.activePlayers.add(socket.id);
-            
-            // Remove from disconnected players
-            delete room.gameState.disconnectedPlayers[existingId];
-            break;
-          }
-        }
-      }
-      
-      // If the player was not found at all, add them as new
-      if (!playerExists) {
-        // Add the player to the game state as a new player
-        const updatedGameState = handleNewPlayer(room.gameState, socket.id);
-        room.gameState = updatedGameState;
-        
-        // Add player name to their data
-        room.gameState.players[socket.id].name = playerName;
-        
-        debugLog('events', `Player ${playerName} not found in room, added as new player`);
-      }
-      
-      // Restore ready status if player was ready before
-      if (wasReady && room.gameState.appPhase === 'readyscreen') {
-        room.gameState.players[socket.id].isReady = true;
-        if (!room.gameState.readyPlayers.includes(socket.id)) {
-          room.gameState.readyPlayers.push(socket.id);
-        }
-        debugLog('events', `Restored ready status for reconnected player ${socket.id}`);
-      }
-      
-      debugLog('events', `Player ${socket.id} (${playerName}) rejoined room ${roomCode}`);
-      
-      // Send roomRejoined event with room details
-      socket.emit('roomRejoined', { 
-        roomCode,
-        playerName,
-        gameState: room.gameState
-      });
-      
-      // Notify other players
-      socket.to(roomCode).emit('playerRejoined', {
-        playerId: socket.id,
-        playerName: playerName,
-        gameState: room.gameState
-      });
-      
-      // Save updated session data
-      socket.emit('saveSession', {
-        roomCode,
-        playerName,
-        socketId: socket.id
-      });
-      
-      // Update room activity
-      room.lastActivity = Date.now();
-    }
+    debugLog('events', `Rejoin attempt blocked - rejoining disabled`);
+    socket.emit('error', { message: 'Rejoining is not allowed. Please create or join a new room.' });
   });
 
   // Leave room
@@ -1044,9 +864,11 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Make sure there are ready players
-    if (room.gameState.readyPlayers.length === 0) {
-      socket.emit('error', { message: 'No players are ready' });
+    // Require ALL players in the room to be ready before starting
+    const totalPlayers = Object.keys(room.gameState.players).length;
+    const readyCount   = room.gameState.readyPlayers.length;
+    if (readyCount !== totalPlayers) {
+      socket.emit('error', { message: 'All players must be ready to start' });
       return;
     }
     
@@ -1101,204 +923,19 @@ io.on('connection', (socket) => {
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Tetris server ${SERVER_ID} running on port ${PORT}`);
-  
-  // Initialize cluster manager after server is running
-  if (clusterManager) {
-    clusterManager.initialize();
-    
-    // Listen for leadership changes
-    clusterManager.on('became-leader', () => {
-      console.log(`Server ${SERVER_ID} became the leader`);
-      
-      // Send server status to all connected clients
-      io.emit('server-status', { 
-        isLeader: true, 
-        serverId: SERVER_ID 
-      });
-      
-      // Set up periodic full state replication to followers
-      const stateReplicationInterval = setInterval(() => {
-        if (clusterManager.isLeaderServer()) {
-          clusterManager.broadcastFullGameState(rooms);
-        } else {
-          // If no longer leader, clear the interval
-          clearInterval(stateReplicationInterval);
-        }
-      }, 3000); // Replicate every 3 seconds
-      
-      // Restart game loops for active rooms using the helper function
-      Object.keys(rooms).forEach(roomCode => {
-        if (rooms[roomCode].gameState.appPhase === 'playing') {
-          debugLog('cluster', `Leader restarting game loop for room ${roomCode}`);
-          
-          // Use the helper function to restart the game loop properly
-          restartGameLoopAsLeader(roomCode);
-        }
-      });
-    });
-    
-    clusterManager.on('stepped-down', () => {
-      console.log(`Server ${SERVER_ID} is no longer the leader`);
-      
-      // Send server status to all connected clients
-      io.emit('server-status', { 
-        isLeader: false, 
-        serverId: SERVER_ID 
-      });
-    });
-    
-    // Listen for state updates from leader
-    clusterManager.on('state-update', (data) => {
-      if (data.action === 'roomCreated' && data.roomCode && data.gameState) {
-        // Convert activePlayers to Set using our new function
-        const gameStateWithSet = data.gameState;
-        if (gameStateWithSet.activePlayers) {
-          gameStateWithSet.activePlayers = getActivePlayersAsSet(gameStateWithSet);
-        }
-        
-        // Replicate room creation from leader
-        rooms[data.roomCode] = {
-          gameState: gameStateWithSet,
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        };
-        
-        debugLog('cluster', `Replicated room ${data.roomCode} from leader`);
-      } 
-      else if (data.action === 'fullStateSync' && data.rooms) {
-        // Handle complete state sync from leader
-        Object.keys(data.rooms).forEach(roomCode => {
-          const roomData = data.rooms[roomCode];
-          
-          // Convert activePlayers back to a Set using our new function
-          if (roomData.gameState && roomData.gameState.activePlayers) {
-            roomData.gameState.activePlayers = getActivePlayersAsSet(roomData.gameState);
-          }
-          
-          if (!rooms[roomCode]) {
-            // This is a new room we didn't have
-            rooms[roomCode] = {
-              gameState: roomData.gameState,
-              createdAt: roomData.createdAt || Date.now(),
-              lastActivity: roomData.lastActivity || Date.now()
-            };
-            debugLog('cluster', `Added new room ${roomCode} from full state sync`);
-          } else {
-            // Update existing room state
-            rooms[roomCode].gameState = roomData.gameState;
-            rooms[roomCode].lastActivity = roomData.lastActivity;
-          }
-          
-          // Make sure game loop is properly set up for this room
-          // But don't start duplicate loops
-          if (roomData.gameState.appPhase === 'playing' && !roomGameLoops[roomCode]) {
-            roomGameLoops[roomCode] = setInterval(() => {
-              if (!rooms[roomCode]) {
-                clearInterval(roomGameLoops[roomCode]);
-                return;
-              }
-              
-              // For followers, just send the state without updating it
-              io.to(roomCode).emit('gameState', rooms[roomCode].gameState);
-            }, FRAME_DELAY);
-          }
-        });
-        
-        debugLog('cluster', `Completed full state sync from leader with ${Object.keys(data.rooms).length} rooms`);
-      }
-      else if (data.action === 'gameStateUpdate' && data.roomCode && data.gameState) {
-        // Handle real-time game state updates
-        
-        // Convert activePlayers back to a Set using our new function
-        if (data.gameState && data.gameState.activePlayers) {
-          data.gameState.activePlayers = getActivePlayersAsSet(data.gameState);
-        }
-        
-        if (rooms[data.roomCode]) {
-          // Update the game state for this room
-          rooms[data.roomCode].gameState = data.gameState;
-          rooms[data.roomCode].lastActivity = Date.now();
-          
-          // Make sure we have the correct game loop setup
-          const appPhase = data.gameState.appPhase;
-          
-          // Only update followers' connected clients if they exist
-          // This prevents errors when players are only connected to the leader
-          const roomSocketIds = io.sockets.adapter.rooms.get(data.roomCode);
-          if (roomSocketIds && roomSocketIds.size > 0) {
-            io.to(data.roomCode).emit('gameState', data.gameState);
-            debugLog('cluster', `Sent real-time game state update for room ${data.roomCode} to ${roomSocketIds.size} clients`);
-          }
-        } else {
-          // We don't have this room yet, create it
-          rooms[data.roomCode] = {
-            gameState: data.gameState,
-            createdAt: Date.now(),
-            lastActivity: Date.now()
-          };
-          debugLog('cluster', `Created new room ${data.roomCode} from real-time update`);
-        }
-      }
-    });
-  }
 });
 
-// Helper function to properly restart game loops when becoming leader
-function restartGameLoopAsLeader(roomCode) {
-  if (!rooms[roomCode] || rooms[roomCode].gameState.appPhase !== 'playing') {
-    return false;
-  }
-  
-  // Clear any existing game loop
-  if (roomGameLoops[roomCode]) {
-    clearInterval(roomGameLoops[roomCode]);
-  }
-  
-  // Create a new game loop that updates the state (only leader does this)
-  roomGameLoops[roomCode] = setInterval(() => {
-    // Skip if room no longer exists
-    if (!rooms[roomCode]) {
-      clearInterval(roomGameLoops[roomCode]);
-      return;
-    }
-    
-    // Update game state for this room
-    updateRoomGameState(roomCode);
-    
-    // Send game state to all players in room
-    io.to(roomCode).emit('gameState', rooms[roomCode].gameState);
-  }, FRAME_DELAY);
-  
-  debugLog('cluster', `Leader established game loop for room ${roomCode}`);
-  return true;
-}
+// Single-server mode: no leader-specific game loop helper
 
 // Add a route for server status - useful for testing
 app.get('/status', (req, res) => {
-  const isLeader = clusterManager ? clusterManager.isLeaderServer() : true;
-  const leaderId = clusterManager ? clusterManager.getLeaderId() : SERVER_ID;
-  
   res.json({
     serverId: SERVER_ID,
     port: PORT,
-    isLeader,
-    leaderId,
-    connectedServers: clusterManager ? Object.keys(clusterManager.connections) : [],
     rooms: Object.keys(rooms),
     uptime: process.uptime()
   });
 });
 
 // Add an endpoint to gracefully kill the server for testing
-app.post('/kill', (req, res) => {
-  console.log(`Server ${SERVER_ID} shutting down by request`);
-  res.send('Server shutting down');
-  
-  // Clean up and exit after a short delay to allow response to be sent
-  setTimeout(() => {
-    if (clusterManager) {
-      clusterManager.shutdown();
-    }
-    process.exit(0);
-  }, 500);
-});
+// Single-server mode: remove remote kill endpoint

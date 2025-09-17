@@ -8,7 +8,6 @@ import './App.css';
 
 // Import server connection manager instead of direct socket.io
 import serverManager from './utils/serverConnection';
-import { saveGameSession, getGameSession, clearGameSession } from './utils/sessionStorage';
 
 // Background image configuration
 const BACKGROUND_IMAGES = [
@@ -147,35 +146,11 @@ function App() {
           setGameState(initialState);
         });
         
-        // Handle room rejoined - when reconnecting to existing session
-        serverManager.on('roomRejoined', (data) => {
-          debugLog('events', 'Received roomRejoined event with data:', data);
-          
-          // Save the new session data with updated socket ID
-          saveGameSession({
-            roomCode: data.roomCode,
-            playerName: data.gameState.players[serverManager.getSocketId()]?.name || 'Player',
-            socketId: serverManager.getSocketId()
-          });
-          
-          // Track successful reconnection to avoid fallback attempts
-          serverManager.hasRejoinedRoom = true;
-          
-          // Update game state for player
-          setGameState(data.gameState);
-          setError(null);
-        });
+        // Room rejoin disabled - no roomRejoined handler
         
-        // Handle room creation - save session
+        // Handle room creation
         serverManager.on('roomCreated', (data) => {
           debugLog('events', 'Received roomCreated event with data:', data);
-          
-          // Save session data for automatic reconnection
-          saveGameSession({
-            roomCode: data.roomCode,
-            playerName: data.gameState.players[serverManager.getSocketId()]?.name || 'Player',
-            socketId: serverManager.getSocketId()
-          });
           
           debugLog('state', 'Setting appPhase to readyscreen from:', gameState?.appPhase);
           setGameState(prevState => {
@@ -189,16 +164,9 @@ function App() {
           setError(null);
         });
         
-        // Handle room join - save session
+        // Handle room join
         serverManager.on('roomJoined', (data) => {
           debugLog('events', 'Received roomJoined event with data:', data);
-          
-          // Save session data for automatic reconnection
-          saveGameSession({
-            roomCode: data.roomCode,
-            playerName: data.gameState.players[serverManager.getSocketId()]?.name || 'Player',
-            socketId: serverManager.getSocketId()
-          });
           
           setGameState(prevState => {
             const newState = {
@@ -211,12 +179,9 @@ function App() {
           setError(null);
         });
         
-        // Handle leaving room - clear session
+        // Handle leaving room
         serverManager.on('roomLeft', (data) => {
           debugLog('events', 'Received roomLeft event with data:', data);
-          
-          // Clear session data when leaving room
-          clearGameSession();
           
           // Set app phase to homescreen
           setGameState({
@@ -313,7 +278,6 @@ function App() {
           
           console.log('Enhanced game over data:', enhancedData);
           
-          clearGameSession();
           setIsGameOver(true);
           setGameOverData(enhancedData);
         });

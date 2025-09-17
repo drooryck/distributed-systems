@@ -4,9 +4,6 @@
     "main": "index.js",
     "scripts": {
         "start": "node src/server.js",
-        "start:cluster": "chmod +x ./start-cluster.sh && ./start-cluster.sh",
-        "kill": "chmod +x ./kill-server.sh && ./kill-server.sh",
-        "stop:cluster": "chmod +x ./stop-cluster.sh && ./stop-cluster.sh",
         "test": "jest",
         "test:unit": "jest tests/unit",
         "test:integration": "jest tests/integration",
