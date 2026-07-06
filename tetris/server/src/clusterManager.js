@@ -15,6 +15,10 @@ class ClusterManager extends EventEmitter {
   constructor(serverId) {
     super();
     this.serverId = serverId;
+
+    // Set by server.js: (roomCode) => room snapshot or null.
+    // Lets the leader answer room-request messages from followers.
+    this.onRoomRequest = null;
     
     try {
       // Load cluster configuration
@@ -87,11 +91,16 @@ class ClusterManager extends EventEmitter {
         // Listen for state updates from leader
         socket.on('state-update', (data) => {
           if (this.isLeader) return; // Leader doesn't need updates
-          
+
           this.lastStateUpdate = data;
           this.emit('state-update', data);
         });
-        
+
+        // Answer room snapshot requests from followers (used during rejoin recovery)
+        socket.on('room-request', (data, callback) => {
+          this.handleRoomRequest(data, callback);
+        });
+
         socket.on('disconnect', () => {
           console.log(`Server disconnected from cluster`);
           delete this.connections[peerId];
@@ -135,17 +144,20 @@ class ClusterManager extends EventEmitter {
           });
           
           socket.on('heartbeat', (data) => {
-            // Debug log to see heartbeats being received
-            console.log(`Server ${this.serverId} received heartbeat from server ${data.serverId}`);
             this.lastHeartbeats[data.serverId] = Date.now();
-            
+
             // If the sender claims to be leader, update our leader info
             if (data.isLeader) {
               this.leaderId = data.serverId;
               this.isLeader = (this.serverId === data.serverId);
             }
-          });  
-          
+          });
+
+          // Answer room snapshot requests arriving over the outgoing connection too
+          socket.on('room-request', (data, callback) => {
+            this.handleRoomRequest(data, callback);
+          });
+
           socket.on('disconnect', () => {
             console.log(`Disconnected from server ${server.id}`);
             delete this.connections[server.id];
@@ -180,10 +192,7 @@ class ClusterManager extends EventEmitter {
     this.heartbeatTimer = setInterval(() => {
       // Update our own heartbeat timestamp first
       this.lastHeartbeats[this.serverId] = Date.now();
-      
-      // Log heartbeats for debugging
-      console.log(`Server ${this.serverId} sending heartbeats to ${Object.keys(this.connections).length} connected servers`);
-      
+
       Object.values(this.connections).forEach(socket => {
         if (socket.connected) {
           socket.emit('heartbeat', { 
@@ -277,10 +286,15 @@ class ClusterManager extends EventEmitter {
       rooms: {}
     };
     
-    // Only send active rooms with essential game state
+    // Only send active rooms with essential game state.
+    // activePlayers is a Set, which does not survive serialization — send an Array.
     Object.keys(rooms).forEach(roomCode => {
+      const gameState = {...rooms[roomCode].gameState};
+      if (gameState.activePlayers instanceof Set) {
+        gameState.activePlayers = Array.from(gameState.activePlayers);
+      }
       stateUpdate.rooms[roomCode] = {
-        gameState: rooms[roomCode].gameState,
+        gameState,
         lastActivity: rooms[roomCode].lastActivity,
         createdAt: rooms[roomCode].createdAt
       };
@@ -358,6 +372,19 @@ class ClusterManager extends EventEmitter {
     console.log(`Cluster manager for server ${this.serverId} shut down`);
   }
   
+  /**
+   * Handle a room-request message: only the leader answers with a snapshot.
+   */
+  handleRoomRequest(data, callback) {
+    if (typeof callback !== 'function') return;
+    if (!this.isLeader || !this.onRoomRequest) {
+      callback({ exists: false });
+      return;
+    }
+    const snapshot = this.onRoomRequest(data && data.roomCode);
+    callback(snapshot ? { exists: true, room: snapshot } : { exists: false });
+  }
+
   /**
    * Request a specific room's state from the leader server
    * Used when a player tries to join a room that isn't found locally on a follower

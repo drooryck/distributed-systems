@@ -1,19 +1,19 @@
 {
-    "name": "server",
+    "name": "tetristributed-cluster-server",
     "version": "1.0.0",
-    "main": "index.js",
+    "main": "src/server.js",
     "scripts": {
         "start": "node src/server.js",
         "start:cluster": "chmod +x ./start-cluster.sh && ./start-cluster.sh",
         "kill": "chmod +x ./kill-server.sh && ./kill-server.sh",
-        "stop:cluster": "chmod +x ./stop-cluster.sh && ./stop-cluster.sh",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "stop:cluster": "chmod +x ./stop-cluster.sh && ./stop-cluster.sh"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
-    "description": "",
+    "description": "Three-server replicated Tetristributed game server (leader-follower with heartbeat election)",
     "dependencies": {
+        "cors": "^2.8.5",
         "express": "^4.18.2",
         "socket.io": "^4.8.1",
         "socket.io-client": "^4.8.1",

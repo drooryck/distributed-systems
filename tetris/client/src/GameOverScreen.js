@@ -1,3 +1,6 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// GameOverScreen.js
+// ──────────────────────────────────────────────────────────────────────────────
 import React, { useEffect, useState } from 'react';
 
 const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
@@ -19,14 +22,8 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
     return () => clearInterval(timer);
   }, [onTimeout]);
 
-  // Make sure we're accessing the correct properties
   const youLost = currentPlayerId === gameOverData.playerId;
-  
-  // Make sure we're explicitly checking for multiplayer mode
-  const isMultiplayer = gameOverData.isMultiplayer === true;
-  
-  // For multiplayer games, ONLY show the total score
-  const scoreToDisplay = isMultiplayer ? gameOverData.totalScore : gameOverData.score;
+  const isMultiplayer = gameOverData.isMultiplayer;
 
   return (
     <div style={{
@@ -72,17 +69,20 @@ const GameOverScreen = ({ gameOverData, currentPlayerId, onTimeout }) => {
           margin: '20px 0'
         }}>
           {isMultiplayer ? (
-            <div>
-              Team Score: <span style={{ fontWeight: 'bold' }}>
-                {scoreToDisplay}
-              </span>
-            </div>
+            <>
+              
+              <div style={{ marginTop: '10px', fontSize: '20px' }}>
+                Team Total: <span style={{ fontWeight: 'bold' }}>
+                  {gameOverData.totalScore}
+                </span>
+              </div>
+            </>
           ) : (
-            <div>
+            <>
               Final Score: <span style={{ fontWeight: 'bold' }}>
-                {scoreToDisplay}
+                {gameOverData.score}
               </span>
-            </div>
+            </>
           )}
         </div>
 
