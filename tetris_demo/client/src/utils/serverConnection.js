@@ -405,7 +405,6 @@ class ServerConnectionManager extends EventEmitter {
   
   attemptRoomRejoin(socket) {
     const session = getGameSession();
-    this.log('negerballen');
     if (session && session.roomCode) {
       this.log(`Attempting to rejoin room ${session.roomCode} as ${session.playerName}`);
       

@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+build/
+dist/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Runtime
+*.pid
+*.log
+*.db-journal
+
+# Test artifacts
+**/tests/load/snapshots/
+
+# Local media
+replicas.mov

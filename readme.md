@@ -1,67 +1,24 @@
-# Tetristributed
+# Distributed Systems — CS 2620 (Spring 2025)
 
-A distributed co-op multiplayer Tetris implementation with real-time gameplay and fault tolerance.
+Coursework and final project for Harvard's CS 2620: Distributed Programming.
 
-## Project Overview
+## Final project: Tetristributed
 
-Tetris is a universally recognized and deceptively simple game. We aimed to build a co-op multiplayer version over the network that we could deploy to production. In our version, multiple sets of tetrominoes fall simultaneously, and each player controls one of the sets of blocks on his/her local machine.The project forced us to tackle many distributed systems challenges, from the client synchronization issues of sharing real-time game state under network latency to the reliability issues of 2-fault-tolerance under server failures. We leverage the model of leader-follower server communication in a cluster with a simple heartbeat election protocol for failover, and use a methodical fine grained board locking system to handle concurrency. We built our app on fullstack JavaScript, using React for frontend UI and Node for the webserver, and enhanced Socket.IO for cluster communication. Our app supports up to four players and up to 10 concurrent games.
+A distributed co-op multiplayer Tetris with real-time gameplay and 2-fault-tolerant server replication.
 
-## Architecture
+**[▶ Play it live](https://distributed-systems-dries-projects-e525fe65.vercel.app/)** · **[Read the full readme](tetris_demo/readme.md)** · [Write-up (PDF)](CS_2620_Final_Project_Writeup.pdf) · [Poster (PDF)](tetris_demo/readme/poster_cs262.pdf)
 
-Explanation of the server architecture in 3 diagrams. To read more, please see the write-up and poster for our project in the readme folder.
+| Folder | What it is |
+|---|---|
+| [`tetris_demo/`](tetris_demo/) | Clean single-server version — canonical codebase, tests, and documentation |
+| [`tetris/`](tetris/) | Three-server leader-follower cluster with heartbeat election and state replication |
+| [`tetris_deploy/`](tetris_deploy/) | Deployment variant: client on Vercel, server on Render |
 
-![Cluster](readme/clusterflow_dead_tetris.png)
-![Frontend](readme/frontend_tetris.png)
-![Server](readme/serverflow_tetris.png)
+## Course assignments
 
-## Key Game Features
-
-- Nintendo Rotation System
-- Multiplayer mechanics (shared board, collision detection)
-- Scoring system
-- Visual effects and animations
-
-## Technical Implementation
-
-### Server-Side
-- Express/Node.js backend
-- Socket.IO for real-time communication
-- Leader election algorithm
-- State replication between servers
-
-### Client-Side
-- React frontend
-- Canvas-based rendering
-- Reconnection handling
-
-See more in our write-up.
-
-
-## Getting Started
-
-### Prerequisites
-- Node.js v14+ 
-- npm or yarn
-
-### Installation
-```bash
-# Clone repository
-git clone git@github.com:drooryck/distributed-systems.git
-
-# Install server dependencies
-cd tetristributed/server
-npm install
-
-# Install client dependencies
-cd ../client
-npm install
-
-# put the right local machine ip for the wifi interface into server/cluster-config.json
-ipconfig getifaddr en0
-
-# spin up the cluster
-cd ../server 
-./run-cluster.sh
-
-# connect to <local_ip>:3000, and enjoy!
-
+| Folder | Assignment |
+|---|---|
+| [`messaging-app/`](messaging-app/) | Client-server chat app with a custom wire protocol vs. JSON |
+| [`grpc-app/`](grpc-app/) | The chat app re-implemented over gRPC |
+| [`logical-clocks/`](logical-clocks/) | Lamport logical clock simulation experiments |
+| [`replication/`](replication/) | Persistent, 2-fault-tolerant replicated chat app |
