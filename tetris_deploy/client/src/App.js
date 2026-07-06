@@ -18,25 +18,11 @@ const BACKGROUND_IMAGES = [
 ];
 const BACKGROUND_CHANGE_INTERVAL = 30000; // 30 seconds
 
-// Load config file to get server address
-const loadConfig = async () => {
-  try {
-    const response = await fetch('/config.json');
-    if (!response.ok) {
-      throw new Error(`Failed to load config: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.warn('Error loading config, using default server address:', error);
-    return { client: { serverAddresses: ["http://localhost:3001"] } };
-  }
-};
-
-// Add debug logger at the top of the file
+// Debug logger
 const DEBUG = {
-  events: true,
-  state: true,
-  render: true
+  events: false,
+  state: false,
+  render: false
 };
 
 function debugLog(type, message, data) {
@@ -100,6 +86,7 @@ function App() {
           // onStateChange callback
           (change) => {
             if (change.type === 'connected') {
+              setServerStatus('connected');
               try {
                 // Parse the URL but preserve the hostname from config
                 const configUrl = new URL(change.server);
@@ -108,31 +95,7 @@ function App() {
                 setConnectedServer(change.server);
               }
             }
-            else if (change.type === 'leaderChanged') {
-              debugLog('events', 'Leader server changed to:', change.server.url);
-              setSocketId(change.server.socket.id);
-              
-              // Update server URL info
-              try {
-                const serverUrl = change.server.url;
-                const parsedUrl = new URL(serverUrl);
-                setConnectedServer(`${parsedUrl.hostname}:${parsedUrl.port}`);
-              } catch (e) {
-                setConnectedServer(change.server.url || 'unknown');
-              }
-              
-              // Server change notification
-              setServerStatus('switchedServer');
-              setTimeout(() => setServerStatus('connected'), 3000);
-              
-              // Re-request initial state after server change
-              serverManager.emit('requestInitialState');
-            }
             else if (change.type === 'disconnected') {
-              setConnectedServer(null);
-            }
-            else if (change.type === 'allServersDown') {
-              setSocketError('All servers are down. Please try again later.');
               setServerStatus('disconnected');
               setConnectedServer(null);
             }
@@ -275,31 +238,19 @@ function App() {
           setError(message);
         });
         
-        /* ----------- FIXED gameOver handler (uses ref) ------------------- */
+        // Game over handler — uses the ref so it never sees stale state
         serverManager.on('gameOver', (data) => {
-          console.log('Game over with data:', data);
-          
           // Use the up-to-date game state to calculate true multiplayer totals
           const current = gameStateRef.current;
           const playerScores = { ...(current?.players || {}) };
-          
+
           const playerCount   = Object.keys(playerScores).length;
           const isMultiplayer = playerCount > 1;
-          
+
           const totalScore = Object.values(playerScores).reduce(
             (sum, player) => sum + (player.score || 0), 0
           );
-          
-          console.log('Score calculation:', {
-            playerScores,
-            playerCount,
-            isMultiplayer,
-            totalScore,
-            serverScore: data.score,
-            clientScore: currentScore,
-            socketId: serverManager.getSocketId()
-          });
-          
+
           // Build enhanced data object
           const enhancedData = {
             ...data,
@@ -310,9 +261,7 @@ function App() {
             playerCount,
             playerScores
           };
-          
-          console.log('Enhanced game over data:', enhancedData);
-          
+
           clearGameSession();
           setIsGameOver(true);
           setGameOverData(enhancedData);
@@ -547,11 +496,6 @@ function App() {
     serverManager.emit('startGame');
   }, []);
 
-  // Handle game mode change
-  const handleSetGameMode = useCallback((mode) => {
-    serverManager.emit('setGameMode', mode);
-  }, []);
-
   // Handle game over timeout
   const handleGameOverTimeout = useCallback(() => {
     setIsGameOver(false);
@@ -595,11 +539,8 @@ function App() {
 
   // Show loading screen if no game state
   if (!gameState) {
-    console.log('No game state yet, showing loading screen');
     return <div className="App"><h1>Waiting for game state...</h1></div>;
   }
-  console.log('Game state received:', gameState);
-  console.log('Current app phase:', gameState.appPhase);
 
   // Render appropriate screen based on app phase
   return (
@@ -648,29 +589,6 @@ function App() {
     </span>
   </div>
 
-      {/* Server Status Notification */}
-      {serverStatus === 'switchedServer' && (
-        <div style={{
-          position: 'fixed',
-          top: '10px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          backgroundColor: 'rgba(50, 50, 50, 0.9)',
-          color: '#fff',
-          padding: '10px 20px',
-          borderRadius: '4px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-          zIndex: 1000,
-          display: 'flex',
-          alignItems: 'center',
-          transition: 'opacity 0.3s ease',
-          opacity: 1
-        }}>
-          <span style={{ marginRight: '10px' }}>⚠️</span>
-          Reconnected to new server. Game continuing...
-        </div>
-      )}
-      
       {gameState.appPhase === 'homescreen' && (
         <NewHomeScreen
           onCreateRoom={handleCreateRoom}
@@ -688,7 +606,6 @@ function App() {
           onReady={handlePlayerReady}
           onStartGame={handleStartGame}
           onLeaveRoom={handleLeaveRoom}
-          onSetGameMode={handleSetGameMode}
           gameMode={gameState.gameMode}
           gameInProgress={gameState.gameInProgress}
           isHost={gameState.players?.[socketId]?.isHost}

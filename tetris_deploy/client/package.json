@@ -1,18 +1,12 @@
 {
-  "name": "tetristributed-client",
+  "name": "tetristributed-client-deploy",
   "version": "1.0.0",
-  "description": "Frontend for Tetristributed using React + Socket.IO",
+  "description": "Tetristributed frontend, deployed on Vercel",
   "private": true,
   "main": "src/index.js",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "react-scripts test",
-    "test:unit": "jest src/__tests__/unit tests/unit",
-    "test:integration": "jest tests/integration",
-    "test:e2e": "jest tests/e2e",
-    "test:coverage": "react-scripts test --coverage",
-    "test:all": "react-scripts test",
     "eject": "react-scripts eject"
   },
   "dependencies": {
@@ -35,6 +29,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "devDependencies": {}
+  }
 }

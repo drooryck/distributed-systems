@@ -420,6 +420,8 @@ function handleDisconnect(gameState, playerId) {
         playerNumber: player.playerNumber,
         color: player.color,
         score: player.score,
+        name: player.name,
+        isHost: player.isHost || false,
         originalId: playerId,
         disconnectedAt: Date.now()
       };
@@ -446,17 +448,9 @@ function handleDisconnect(gameState, playerId) {
         console.log(`Cleaned up board from disconnected player ${playerId}`);
       }
       
-      // Remove player from active game
+      // Remove player from active game. If every player has disconnected the
+      // server cleans up the whole room, so no extra handling is needed here.
       delete gameState.players[playerId];
-      
-      // Check if all players have disconnected
-      if (gameState.activePlayers.size === 0) {
-        // End the game
-        gameState.appPhase = 'homescreen';
-        gameState.gameInProgress = false;
-        gameState.disconnectedPlayers = {};
-        console.log('All players disconnected, ending game');
-      }
     } else {
       // Just remove the player if not in a game
       delete gameState.players[playerId];
