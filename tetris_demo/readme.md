@@ -1,67 +1,80 @@
 # Tetristributed
 
-A distributed co-op multiplayer Tetris implementation with real-time gameplay and fault tolerance.
+Co-op multiplayer Tetris over the network: every player controls their own falling piece on one shared board, in real time, at 60 FPS.
 
-## Project Overview
+**[▶ Play it live](https://distributed-systems-dries-projects-e525fe65.vercel.app/)** — client on Vercel, server on Render. The backend runs on Render's free tier and sleeps when idle, so the first connection can take ~30–60 s to wake it.
 
-Tetris is a universally recognized and deceptively simple game. We aimed to build a co-op multiplayer version over the network that we could deploy to production. In our version, multiple sets of tetrominoes fall simultaneously, and each player controls one of the sets of blocks on his/her local machine.The project forced us to tackle many distributed systems challenges, from the client synchronization issues of sharing real-time game state under network latency to the reliability issues of 2-fault-tolerance under server failures. We leverage the model of leader-follower server communication in a cluster with a simple heartbeat election protocol for failover, and use a methodical fine grained board locking system to handle concurrency. We built our app on fullstack JavaScript, using React for frontend UI and Node for the webserver, and enhanced Socket.IO for cluster communication. Our app supports up to four players and up to 10 concurrent games.
+Built by [Dries Rooryck](https://github.com/drooryck) and Joseph Oronto-Pratt as the final project for Harvard's CS 2620 (Distributed Programming). See the [write-up (PDF)](../CS_2620_Final_Project_Writeup.pdf) and [poster (PDF)](readme/poster_cs262.pdf) for the full story.
+
+## What's in this folder
+
+This is the **single-server** version of the game — the cleanest codebase for reading and local play. The **three-server, 2-fault-tolerant cluster** version (leader election, heartbeats, state replication, client failover) lives in [`../tetris`](../tetris).
+
+```
+server/   Node + Express + Socket.IO game server (authoritative, 60 FPS tick)
+client/   React + Konva frontend (canvas rendering, animations)
+```
+
+## Quickstart
+
+```bash
+# Terminal 1 — server (port 3001)
+cd server && npm install && npm start
+
+# Terminal 2 — client (port 3000, opens a browser)
+cd client && npm install && npm start
+```
+
+Create a room, share the 6-character room code, have friends join from their browser, ready up (X), and the host starts the game. Up to 4 players per room.
+
+## Gameplay
+
+- **Shared board** that widens with player count: 10 columns solo, 14 / 21 / 28 for 2 / 3 / 4 players, each player with their own spawn zone and piece color.
+- **Nintendo Rotation System** (NES-faithful: four rotation states, no wall kicks), DAS auto-shift (14-frame delay, 2-frame repeat), 30-frame lock delay with up to 15 lock resets, 12-frame entry delay.
+- **Pieces collide in the air** — including against other players' active pieces; locking is only allowed on the floor or on locked blocks (this makes hard-drops onto another player behave correctly).
+- **Scoring**: 100 per line clear, +1 per soft-dropped cell, +2 per hard-dropped cell. Game ends when any player tops out; the team's summed score is the final score.
+- Line-clear particle explosions, lock flashes, rotating backgrounds, and sound cues, all synchronized to the server's authoritative animation timers.
+
+| Key | Action |
+|---|---|
+| ← → | Move (hold for auto-shift) |
+| ↓ | Soft drop |
+| ↑ / Z | Rotate |
+| Space | Hard drop |
+| X | Ready up (lobby) |
 
 ## Architecture
 
-Explanation of the server architecture in 3 diagrams. To read more, please see the write-up and poster for our project in the readme folder.
+The server is authoritative: clients only send inputs (`playerAction`), the server simulates every room in a 60 FPS loop and broadcasts the resulting `gameState` to the room. Rooms are keyed by 6-character codes; each room has its own game loop, players, and board.
 
-![Cluster](readme/clusterflow_dead_tetris.png)
-![Frontend](readme/frontend_tetris.png)
-![Server](readme/serverflow_tetris.png)
+![Server flow](readme/serverflow_tetris.png)
 
-## Key Game Features
+![Frontend flow](readme/frontend_tetris.png)
 
-- Nintendo Rotation System
-- Multiplayer mechanics (shared board, collision detection)
-- Scoring system
-- Visual effects and animations
+### Socket protocol (client ⇄ server)
 
-## Technical Implementation
+| Client emits | Server emits |
+|---|---|
+| `createRoom { playerName }` | `roomCreated { roomCode, gameState }` |
+| `joinRoom { roomCode, playerName }` | `roomJoined` / `playerJoined` / `error` |
+| `rejoinRoom { roomCode, playerName, previousSocketId }` | `roomRejoined` / `playerRejoined` |
+| `ready` | `playerReady { gameState }` |
+| `startGame` (host only) | `gameState` (60 FPS during play) |
+| `playerAction { type, ... }` | `gameOver { score, totalScore, ... }` |
+| `leaveRoom` | `roomLeft` / `playerLeft` / `hostAssigned` |
 
-### Server-Side
-- Express/Node.js backend
-- Socket.IO for real-time communication
-- Leader election algorithm
-- State replication between servers
+Disconnecting mid-game parks the player in `disconnectedPlayers` (score preserved); reconnecting with the same session (kept in `localStorage`) restores them into the running game. Joining a room whose game is in progress is rejected.
 
-### Client-Side
-- React frontend
-- Canvas-based rendering
-- Reconnection handling
+### Fault tolerance (the "distributed" part)
 
-See more in our write-up.
+The cluster version in [`../tetris`](../tetris) runs three server replicas. One leader (lowest live server ID) owns all game state and serves clients; followers receive per-frame incremental updates plus a full snapshot every 3 s. Failure of the leader is detected by missed heartbeats (2 s interval, 6 s timeout), the remaining servers elect the lowest surviving ID, and clients redirect and rejoin their room on the new leader — mid-game.
 
+![Cluster failover](readme/clusterflow_dead_tetris.png)
 
-## Getting Started
+## Tests
 
-### Prerequisites
-- Node.js v14+ 
-- npm or yarn
-
-### Installation
 ```bash
-# Clone repository
-git clone git@github.com:drooryck/distributed-systems.git
-
-# Install server dependencies
-cd tetristributed/server
-npm install
-
-# Install client dependencies
-cd ../client
-npm install
-
-# put the right local machine ip for the wifi interface into server/cluster-config.json
-ipconfig getifaddr en0
-
-# spin up the cluster
-cd ../server 
-./run-cluster.sh
-
-# connect to <local_ip>:3000, and enjoy!
-
+cd server && npm test    # unit (game logic) + integration (real server + socket.io clients)
+cd client && npm test    # component tests (React Testing Library)
+cd server && npm run test:load   # artillery load test (server must be running)
+```

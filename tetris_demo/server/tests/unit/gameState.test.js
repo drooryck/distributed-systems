@@ -276,8 +276,7 @@ describe('Game State Functions', () => {
       expect(gameState.players).not.toHaveProperty(playerId);
     });
     
-    // Skip this test as it's failing and will be fixed later
-    test.skip('saves player data for rejoining during gameplay', () => {
+    test('saves player data for rejoining during gameplay', () => {
       const gameState = createGameState();
       const playerId = 'player1';
       

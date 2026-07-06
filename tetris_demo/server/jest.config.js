@@ -1,8 +1,8 @@
 module.exports = {
   testEnvironment: 'node',
-  testMatch: ['**/__tests__/**/*.js?(x)', '**/?(*.)+(spec|test).js?(x)', '**/tests/**/*.js?(x)'],
+  testMatch: ['**/tests/**/*.test.js'],
   coveragePathIgnorePatterns: ['/node_modules/', '/tests/'],
-  testTimeout: 30000, // Some tests might take longer due to simulating network conditions
+  testTimeout: 30000,
   setupFilesAfterEnv: ['./tests/setup.js'],
   verbose: true
 };

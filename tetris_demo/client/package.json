@@ -7,12 +7,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "test": "react-scripts test",
-    "test:unit": "jest src/__tests__/unit tests/unit",
-    "test:integration": "jest tests/integration",
-    "test:e2e": "jest tests/e2e",
-    "test:coverage": "react-scripts test --coverage",
-    "test:all": "react-scripts test",
+    "test": "jest tests",
     "eject": "react-scripts eject"
   },
   "dependencies": {
@@ -39,9 +34,8 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^14.1.0",
-    "@testing-library/react-hooks": "^8.0.1",
     "@testing-library/user-event": "^14.6.1",
     "jest": "^27.5.1",
-    "msw": "^2.7.5"
+    "jest-environment-jsdom": "^27.5.1"
   }
 }
